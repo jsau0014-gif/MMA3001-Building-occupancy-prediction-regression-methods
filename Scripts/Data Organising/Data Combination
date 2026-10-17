@@ -1,0 +1,30 @@
+import pandas as pd
+from pathlib import Path
+
+ID_Loc = Path("Data")/"Sensor ID and Locations.xlsx"
+
+#Loading First Sheet, environmental Sensors
+env_sens=pd.read_excel(ID_Loc,sheet_name=0)
+
+#Loading Second Sheet, occupancy Sensors
+Occ_sens=pd.read_excel(ID_Loc, sheet_name=1)
+
+def clean_room(room):
+    """
+    Converts room names to a standard Letternumber format IE:
+    g.57 -> G57
+    G57 -> G57
+    """
+
+    if pd.isna(room):
+        return None
+    room = str(room).strip().upper #converting to string and removing spaces and converting to uppercase
+    
+    room = re.sub(r"[A-Z0-9]", "",room) #removes punctuation for formating
+    return room
+env_sens["Room"] = env_sens["Floor/Room"]
+Occ_sens["Room"] = Occ_sens["Floor/Room"]
+
+env_sens["RoomKey"] = env_sens["Floor/Room"].apply(clean_room)
+Occ_sens["RoomKey"] = Occ_sens["Floor/Room"].apply(clean_room)
+
