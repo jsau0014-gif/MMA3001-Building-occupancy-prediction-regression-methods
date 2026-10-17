@@ -1,5 +1,6 @@
 import pandas as pd
 from pathlib import Path
+import re
 
 ID_Loc = Path("Data")/"Sensor ID and Locations.xlsx"
 
@@ -18,13 +19,63 @@ def clean_room(room):
 
     if pd.isna(room):
         return None
-    room = str(room).strip().upper #converting to string and removing spaces and converting to uppercase
+    room = str(room).strip().upper() #converting to string and removing spaces and converting to uppercase
     
-    room = re.sub(r"[A-Z0-9]", "",room) #removes punctuation for formating
+    room = re.sub(r"[^A-Z0-9]", "",room) #removes punctuation for formating
     return room
+
+
 env_sens["Room"] = env_sens["Floor/Room"]
 Occ_sens["Room"] = Occ_sens["Floor/Room"]
 
 env_sens["RoomKey"] = env_sens["Floor/Room"].apply(clean_room)
 Occ_sens["RoomKey"] = Occ_sens["Floor/Room"].apply(clean_room)
 
+#renaming headings
+env_sens = env_sens.rename(columns={
+    "ID": "Environment Sensor ID",
+    "Physical Label": "SensorLabel",
+    "Area": "EnvArea"
+})
+
+Occ_sens = Occ_sens.rename(columns={
+    "ID":"OccupancySensorID",
+    "Area":"OccArea"
+})
+#Grouping Environment Sensor ID's with room locations
+env_lookup = (
+    env_sens.groupby(["Building","Room"])
+    .agg({
+        "Environment Sensor ID": lambda x: list(pd.unique(x.dropna())), #removes duplicates and NAN values from group
+        "SensorLabel": lambda x: list(pd.unique(x.dropna())),
+        "EnvArea":  lambda x: list(pd.unique(x.dropna())) 
+    })
+    .reset_index()
+)
+
+#Grouping Occupant Sensor ID's with room locations
+Occ_lookup = (
+    Occ_sens.groupby(["Building","Room"])
+    .agg({
+        "FloorId": lambda x: list(pd.unique(x.dropna())),
+        "SpaceId": lambda x: list(pd.unique(x.dropna())),
+        "OccupancySensorID": lambda x: list(pd.unique(x.dropna()))
+    })
+    .reset_index()
+)
+
+#merging environmental and occupant sensor lookups
+room_lookup = pd.merge(
+    env_lookup,
+    Occ_lookup,
+    on=["Building", "Room"],
+    how="outer"
+)
+
+room_lookup.to_csv(
+    "Room_Sensor_Mapping.csv",
+    index=False
+)
+
+print("\nRoom mapping created.")
+print(f"{len(room_lookup)} rooms found.")
