@@ -54,7 +54,7 @@ features = [
 
 #placing inputs in X array and outputs in Y array
 X = data[features]
-Y = data["Headcount"]
+y = data["Headcount"]
 
 print("\nTotal observations:", len(data))
 print("Number of input features:", X.shape[1])
@@ -62,18 +62,22 @@ print("Number of input features:", X.shape[1])
 #splitting data chronoligically 80/20
 data = data.sort_values("Timestamp").reset_index(drop=True)
 
-# Recreate X and y in chronological order
-X = data[features]
-y = data["Headcount"]
+X_train, X_validation, y_train, y_validation = train_test_split(
+    X,
+    y,
+    test_size=0.20,
+    random_state=42,
+    shuffle=True
+)
 
-# First 80% for training, final 20% for validation
-split_index = int(len(data) * 0.8)
+print("\nTraining observations:", len(X_train))
+print("Validation observations:", len(X_validation))
 
-X_train = X.iloc[:split_index]
-X_validation = X.iloc[split_index:]
+print("\nTraining mean:", y_train.mean())
+print("Validation mean:", y_validation.mean())
 
-y_train = y.iloc[:split_index]
-y_validation = y.iloc[split_index:]
+print("\nTraining standard deviation:", y_train.std())
+print("Validation standard deviation:", y_validation.std())
 
 print("\nTraining date range:")
 print(data.loc[X_train.index, "Timestamp"].min())
