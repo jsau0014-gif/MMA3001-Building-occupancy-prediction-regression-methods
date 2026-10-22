@@ -66,53 +66,82 @@ events = data.drop_duplicates(
 
 #calculating time weighted occupany per min
 
-times=(
+# Timestamp representation in integer nanoseconds
+time_ns = (
     events["Timestamp"]
+    .dt.as_unit("ns")
     .astype("int64")
-    .to_numpy() / 1e9
+    .to_numpy()
 )
 
-headcounts = events["headcount"].to_numpy()
+headcounts = events["headcount"].to_numpy(dtype=np.int64)
 
-#cumulative area under the headcount-time urve
+# Duration between consecutive readings
+duration_ns = np.diff(time_ns)
 
-durations = np.diff(times)
-
-areas = np.concatenate((
-    [0.0],
-    np.cumsum(headcounts[:-1]*durations)
+# Cumulative area under the occupancy-time curve
+cumulative_area = np.concatenate((
+    np.array([0], dtype=np.int64),
+    np.cumsum(
+        headcounts[:-1] * duration_ns,
+        dtype=np.int64
+    )
 ))
 
-def cumulative_occupancy(boundaries):
-    """Integrated headcount from first reading to each boundary."""
+def integral_at(boundaries_ns):
+    """Cumulative headcount × time at each boundary."""
 
     indices = np.searchsorted(
-        times, boundaries, side="right"
+        time_ns,
+        boundaries_ns,
+        side="right"
     ) - 1
 
-    safe_indicies = np.maximum(indices,0)
-
-    values = (
-        areas[safe_indicies]
-        + headcounts[safe_indicies]
-        *(boundaries - times[safe_indicies])
+    results = np.zeros(
+        len(boundaries_ns),
+        dtype=np.int64
     )
 
-    return np.where(indices >=0,values, 0.0)
+    valid = indices >= 0
 
-minute_start = minute_counts.index.asi8 / 1e9
-minute_end = minute_start + 60
+    results[valid] = (
+        cumulative_area[indices[valid]]
+        + headcounts[indices[valid]]
+        * (
+            boundaries_ns[valid]
+            - time_ns[indices[valid]]
+        )
+    )
 
-weighted_area = (
-    cumulative_occupancy(minute_end)
-    - cumulative_occupancy(minute_start)
+    return results
+
+
+# Start and end of every retained minute
+minute_start_ns = minute_counts.index.as_unit("ns").asi8
+minute_end_ns = minute_start_ns + 60_000_000_000
+
+# Time-weighted area during each minute
+minute_area = (
+    integral_at(minute_end_ns)
+    - integral_at(minute_start_ns)
 )
 
-covered_seconds = (
-    minute_end - np.maximum(minute_start,times[0])
+# Account for the first partial minute
+covered_ns = (
+    minute_end_ns
+    - np.maximum(minute_start_ns, time_ns[0])
 )
 
-average_headcount = weighted_area/covered_seconds
+# Calculate minute-average occupancy
+average_headcount = minute_area / covered_ns
+
+print("\nFirst 10 calculated minute averages:")
+
+for timestamp, avg in zip(
+    minute_counts.index[:10],
+    average_headcount[:10]
+):
+    print(timestamp, round(avg, 4))
 
 #creating the training dataset
 
@@ -151,3 +180,64 @@ print(training.head(10).to_string(index=False))
 
 print("\nSaved to:", output_file)
 print("G20 validation data was not modified.")
+
+
+
+# ---------------------------------------------
+# Visual verification of preprocessing
+# ---------------------------------------------
+
+# Select the first 30mins
+start = training["Timestamp"].iloc[0]
+end = start + pd.Timedelta(minutes=30)
+
+# Original sensor readings
+raw_sample = data[
+    (data["Timestamp"] >= start) &
+    (data["Timestamp"] < end)
+].copy()
+
+# Processed minute averages
+minute_sample = training[
+    (training["Timestamp"] >= start) &
+    (training["Timestamp"] < end)
+].copy()
+
+# Convert raw timestamps to Melbourne time
+raw_sample["Timestamp"] = (
+    raw_sample["Timestamp"]
+    .dt.tz_convert("Australia/Melbourne")
+)
+
+plt.figure(figsize=(14, 6))
+
+# Raw occupancy (assumed constant between readings)
+plt.step(
+    raw_sample["Timestamp"],
+    raw_sample["headcount"],
+    where="post",
+    label="Original headcount",
+    color="steelblue",
+    linewidth=1.2,
+    alpha=0.7
+)
+
+# One-minute time-weighted averages
+plt.scatter(
+    minute_sample["Timestamp"] + pd.Timedelta(seconds=30),
+    minute_sample["Headcount"],
+    label="One-minute weighted average",
+    color="darkorange",
+    s=18,
+    zorder=3
+)
+
+plt.title("G.25: Original vs One-Minute Occupancy")
+plt.xlabel("Time")
+plt.ylabel("Headcount")
+plt.legend()
+plt.grid(True, alpha=0.3)
+plt.tight_layout()
+
+plt.show()
+
