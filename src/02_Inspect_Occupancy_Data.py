@@ -1,3 +1,8 @@
+"""
+    Inspecting the extracted data to guage what time domain each room has, 
+    the spread of occupancy and status data across the domain
+"""
+
 import pandas as pd
 from pathlib import Path
 
