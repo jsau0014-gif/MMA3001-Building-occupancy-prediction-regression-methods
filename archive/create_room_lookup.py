@@ -46,7 +46,9 @@ Occ_sens = Occ_sens.rename(columns={
 env_lookup = (
     env_sens.groupby(["Building","Room"])
     .agg({
-        "Environment Sensor ID": lambda x: list(pd.unique(x.dropna())), #removes duplicates and NAN values from group
+        "Environment Sensor ID": lambda x: [
+            int(value) for value in pd.unique(x.dropna())
+        ], #removes duplicates and NAN values from group
         "SensorLabel": lambda x: list(pd.unique(x.dropna())),
         "EnvArea":  lambda x: list(pd.unique(x.dropna())) 
     })
