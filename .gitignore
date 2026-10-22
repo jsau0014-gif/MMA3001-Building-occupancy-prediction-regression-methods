@@ -1,0 +1,25 @@
+# Python temporary files
+__pycache__/
+*.pyc
+
+# Virtual environments
+.venv/
+venv/
+
+# VS Code settings
+.vscode/
+
+# Generated datasets
+Data/processed/
+Room_CO2_Data.csv
+5_Sensor_Environment_Data.csv
+Sensor_Data_Summary.csv
+G23_Occupancy*.csv
+
+# Trained model files
+*.pkl
+*.joblib
+
+# Operating system files
+.DS_Store
+Thumbs.db
