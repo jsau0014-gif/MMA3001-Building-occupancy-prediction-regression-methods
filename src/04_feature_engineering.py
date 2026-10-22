@@ -20,7 +20,7 @@ train_file = data_dir / "G25_Minute_Training.csv"
 validation_file = data_dir / "G20_Occupancy.csv"
 
 train_output = data_dir / "G25_Model_Train.csv"
-validation_output = data_dir / "G20_Model_Validation"
+validation_output = data_dir / "G20_Model_Validation.csv"
 
 #pulling g25 training data from csv files
 train = pd.read_csv(train_file)
@@ -60,7 +60,11 @@ def create_features(data):
     )
 
     # Daily cyclical features
-    data["Timesin"] = np.sin(
+    data["TimeSin"] = np.sin(
+        2 * np.pi * time_of_day / 24
+    )
+
+    data["TimeCos"] = np.cos(
         2 * np.pi * time_of_day / 24
     )
 
@@ -113,11 +117,11 @@ output_columns = [
 ] + features
 
 train = train[output_columns].copy()
-validation = train[output_columns].copy()
+validation = validation[output_columns].copy()
 
 #removing rows with invalid timestamps or targets
 train = train.dropna(subset=output_columns)
-validation = train.dropna(subset=output_columns)
+validation = validation.dropna(subset=output_columns)
 
 #saving data files
 train.to_csv(train_output, index=False)
