@@ -6,147 +6,148 @@ This allows for unbiased modelling
 """
 
 import pandas as pd
+import numpy as np
 from pathlib import Path
 import matplotlib.pyplot as plt
 
 project_Dir = Path(__file__).resolve().parent.parent
+data_dir = project_Dir / "Data" / "processed"
 
-input_dir = project_Dir / "Data" / "processed"
 
-rooms = ["G20","G25"]
+input_file = data_dir / "G25_Occupancy.csv"
+output_file = data_dir / "G25_Minute_Training.csv"
 
-for room in rooms:
+#loading training data
+data = pd.read_csv(
+    input_file,
+    usecols=["collecteddate","headcount"]
 
-    #extracting date and headcount data
-    file = input_dir / f"{room}_Occupancy.csv"
-    data = pd.read_csv(
-        file,
-        usecols=["collecteddate","headcount"]
-    )
+)
 
-    #converting timestampls
-    data["Timestamp"] = pd.to_datetime(
-        data["collecteddate"],
-        utc=True,
-        errors="coerce"
-    ).dt.tz_convert("Australia/Melbourne")
+data["Timestamp"] = pd.to_datetime(
+    data["collecteddate"],
+    utc=True,
+    errors="coerce"
+)
 
 # Ensure headcount is numeric
-    data["headcount"] = pd.to_numeric(
-        data["headcount"],
-        errors="coerce"
-    )
-
+data["headcount"] = pd.to_numeric(
+    data["headcount"],
+    errors="coerce"
+)
 # Remove invalid measurements
-    data = data.dropna(
-        subset=["Timestamp", "headcount"]
-    )
-    #sorting chronologically
-    data=data.sort_values("Timestamp",kind="stable")
+data = data.dropna(
+    subset=["Timestamp", "headcount"]
+)
+#sorting chronologically
+data=data.sort_values("Timestamp",kind="stable")
 
-    #converting into one minute occupancy measurments (minute resolution)
-    occupancy = data.set_index("Timestamp")["headcount"]
+print("\nFirst 15 original measurements:")
+print(
+    data[["Timestamp", "headcount"]]
+    .head(15)
+    .to_string(index=False)
+)
 
-    #take the latest measurement within each minute
-    minute_data = occupancy.resample("1min").last()
+print("\nOriginal headcount statistics:")
+print(data["headcount"].describe())
 
-    minute_data = minute_data.ffill()
+minute_counts = data.groupby(
+    data["Timestamp"].dt.floor("min")
+).size()
 
-    hourly = minute_data.resample("1h").mean()
+#If multiple readings have identical timestamps,
+#kep the last for the time weighted calc
 
-    #count actual measurements in each hour
-    hourly_counts = occupancy.resample("1h").count()
+events = data.drop_duplicates(
+    subset="Timestamp",
+    keep="last"
+)
 
-    #count minutes with esitmate occupancy values
-    coverage = minute_data.resample("1h").count()
+#calculating time weighted occupany per min
 
-    #combine into one dataframe
-    hourly = pd.DataFrame({
-        "Headcount": hourly,
-        "MeasurementCount": hourly_counts,
-        "CoverageMinutes": coverage
-    })
+times=(
+    events["Timestamp"]
+    .astype("int64")
+    .to_numpy() / 1e9
+)
 
-    #keep hours with atleast one measurement
-    hourly = hourly[
-        hourly["MeasurementCount"] >0 
-    ].copy()
+headcounts = events["headcount"].to_numpy()
 
-    #Calculate approximate percentage of hour covvered using weighted averages
-    hourly["CoveragePct"] = (
-        hourly["CoverageMinutes"] / 60*100
-    )
+#cumulative area under the headcount-time urve
 
-    #Restore timestamp as a column
-    hourly = hourly.reset_index()
+durations = np.diff(times)
 
-    #Extracting time-based features
-    hourly["Hour"] = hourly["Timestamp"].dt.hour
+areas = np.concatenate((
+    [0.0],
+    np.cumsum(headcounts[:-1]*durations)
+))
 
-    hourly["DayOfWeek"] = (
-        hourly["Timestamp"].dt.dayofweek
-    )
+def cumulative_occupancy(boundaries):
+    """Integrated headcount from first reading to each boundary."""
 
-    hourly["Month"] = hourly["Timestamp"].dt.month
+    indices = np.searchsorted(
+        times, boundaries, side="right"
+    ) - 1
 
-    hourly["IsWeekend"] = (
-        hourly["DayOfWeek"] >=5
-    ).astype(int)
+    safe_indicies = np.maximum(indices,0)
 
-
-    
-    #saving output data
-    output_file = input_dir / f"{room}_Hourly.csv"
-
-    hourly.to_csv(output_file, index=False)
-
-    print(f"\n========== {room} ==========")
-
-    print("Raw measurements:", len(data))
-
-    print("Total hours in date range:", len(hourly_counts))
-
-    print("Hours containing measurements:", len(hourly))
-
-    print("\nHourly headcount statistics:")
-    print(hourly["Headcount"].describe())
-
-    print("\nHourly measurement coverage:")
-    print(hourly["CoveragePct"].describe())
-
-    print("\nFirst 10 hourly measurements:")
-    print(hourly.head(10).to_string(index=False))
-
-    # --------------------------------------------------
-    # Plot first week of occupancy
-    # --------------------------------------------------
-
-    start = hourly["Timestamp"].min()
-    end = start + pd.Timedelta(days=7)
-
-    sample = hourly[
-        (hourly["Timestamp"] >= start) &
-        (hourly["Timestamp"] < end)
-    ]
-
-    plt.figure(figsize=(12, 5))
-
-    plt.plot(
-        sample["Timestamp"],
-        sample["Headcount"],
-        marker=".",
-        markersize=3,
-        linewidth=1
+    values = (
+        areas[safe_indicies]
+        + headcounts[safe_indicies]
+        *(boundaries - times[safe_indicies])
     )
 
-    plt.title(
-        f"{room} - Hourly Average Headcount"
-    )
+    return np.where(indices >=0,values, 0.0)
 
-    plt.xlabel("Time")
-    plt.ylabel("Average Headcount")
-    plt.grid(True)
-    plt.tight_layout()
+minute_start = minute_counts.index.asi8 / 1e9
+minute_end = minute_start + 60
 
-plt.show()
+weighted_area = (
+    cumulative_occupancy(minute_end)
+    - cumulative_occupancy(minute_start)
+)
 
+covered_seconds = (
+    minute_end - np.maximum(minute_start,times[0])
+)
+
+average_headcount = weighted_area/covered_seconds
+
+#creating the training dataset
+
+training = pd.DataFrame({
+    "Timestamp": minute_counts.index.tz_convert(
+        "Australia/Melbourne"
+    ),
+    "Headcount": average_headcount,
+    "MeasurementCount": minute_counts.to_numpy()
+})
+
+#extract time-based features
+training["Hour"] = training["Timestamp"].dt.hour
+training["Minute"] = training["Timestamp"].dt.minute
+training["DayOfWeek"] = training["Timestamp"].dt.dayofweek
+training["Month"] = training["Timestamp"].dt.month
+
+training["IsWeekend"] = (
+    training["DayOfWeek"] >= 5
+).astype(int)
+
+#saving the processed data
+training.to_csv(output_file, index=False)
+
+#displaying results
+print("\nG25 training preprocessing complete")
+
+print("Original measurements:", len(data))
+print("One-minute observations:", len(training))
+
+print("\nTraining headcount statistics:")
+print(training["Headcount"].describe())
+
+print("\nFirst 10 rows:")
+print(training.head(10).to_string(index=False))
+
+print("\nSaved to:", output_file)
+print("G20 validation data was not modified.")
