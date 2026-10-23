@@ -433,7 +433,7 @@ print("gamma:", best_gamma)
 
 #use best param config on full 50 000 observations
 
-svr_sample_size=500000
+svr_sample_size=50000
 
 X_svr_train = X_train.sample(
     n=svr_sample_size,
@@ -784,3 +784,26 @@ plt.savefig(
 print("\nResults saved to:", results_dir)
 
 plt.show()
+
+# ---------------------------------------------
+# Save fitted G25 models for G20 validation
+# ---------------------------------------------
+
+import joblib
+
+joblib.dump(
+    linear_model,
+    results_dir / "05_linear_model.joblib"
+)
+
+joblib.dump(
+    best_tree,
+    results_dir / "05_decision_tree.joblib"
+)
+
+joblib.dump(
+    svr_model,
+    results_dir / "05_svr_model.joblib"
+)
+
+print("\nAll three fitted G25 models saved successfully.")
