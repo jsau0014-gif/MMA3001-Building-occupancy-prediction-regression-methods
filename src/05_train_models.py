@@ -282,67 +282,216 @@ plt.savefig(
 
 #Setting Up SVR Regression 
 #Number of observations used to train svr
-svr_sample_size = 50000
+tuning_sample_size = 30000
 
 #selecting random sample from g25 traiing data
-X_svr_train = X_train.sample(
-    n=svr_sample_size,
+X_tuning_sample = X_train.sample(
+    n=tuning_sample_size,
     random_state=42 #should pull the same 5000 data set each run
 )
 
 #select corresponding target values with mask
+y_tuning_sample = y_train.loc[X_tuning_sample.index]
+
+
+#splite tuning sample into fitting and tuning subsets
+X_svr_fit, X_svr_tune, y_svr_fit, y_svr_tune = train_test_split(
+    X_tuning_sample,
+    y_tuning_sample,
+    test_size=0.2,
+    random_state=42
+)
+
+#defining parameters to tune
+parameter_grid = {
+    "C":[100,200,400],
+    "epsilon": [1.0],
+    "gamma" : ["scale",0.3,0.6]
+}
+
+configurations = list(ParameterGrid(parameter_grid))
+
+tuning_results = []
+
+print("\nSVR Hyperparameter Tuning")
+print("Fitting observations:", len(X_svr_fit))
+print("Tuning observations:", len(X_svr_tune))
+print("Configurations:", len(configurations))
+
+#loopig through each parameter change 
+for i, params in enumerate(configurations, start=1):
+
+    svr_tuning_model = make_pipeline(
+        StandardScaler(),
+        SVR(
+            kernel="rbf",
+            C=params["C"],
+            epsilon=params["epsilon"],
+            gamma=params["gamma"]
+        )
+    )
+
+    start_time = time.perf_counter()
+
+    svr_tuning_model.fit(X_svr_fit, y_svr_fit)
+
+    training_time = time.perf_counter() - start_time
+
+    #predict internal tuning data
+    tuning_prediction = svr_tuning_model.predict(X_svr_tune)
+
+    #Calculate Accuracy
+    tuning_metrics = regression_metrics(
+        y_svr_tune,
+        tuning_prediction
+    )
+
+    support_vectors = len(
+        svr_tuning_model.named_steps["svr"].support_
+    )
+
+    tuning_results.append({
+        "C": params["C"],
+        "epsilon": params["epsilon"],
+        "gamma": params["gamma"],
+        "MAE": tuning_metrics["MAE"],
+        "RMSE": tuning_metrics["RMSE"],
+        "R2": tuning_metrics["R2"],
+        "TrainingTime": training_time,
+        "SupportVectors": support_vectors
+    })
+    
+    print(
+        f"{i:02d}/{len(configurations)} | "
+        f"C={params['C']} | "
+        f"epsilon={params['epsilon']} | "
+        f"gamma={params['gamma']} | "
+        f"RMSE={tuning_metrics['RMSE']:.4f} | "
+        f"Time={training_time:.2f}s"
+    )
+
+#comparing tuning results
+tuning_comparison = pd.DataFrame(tuning_results)
+
+#sort config by lowest RMSE
+tuning_comparison = tuning_comparison.sort_values(
+    "RMSE"
+).reset_index(drop=True)
+
+print("\nSVR Tuning Results:")
+print(tuning_comparison.to_string(index=False))
+
+#save full tuning results
+tuning_comparison.to_csv(
+    results_dir / "05_svr_tuning_round2.csv",
+    index=False
+)
+
+# ---------------------------------------------
+# SVR Hyperparameter Tuning Graph
+# ---------------------------------------------
+
+plt.figure(figsize=(9, 5))
+
+for epsilon in sorted(tuning_comparison["epsilon"].unique()):
+
+    subset = tuning_comparison[
+        tuning_comparison["epsilon"] == epsilon
+    ].sort_values("C")
+
+    plt.plot(
+        subset["C"],
+        subset["RMSE"],
+        marker="o",
+        label=f"Epsilon = {epsilon}"
+    )
+
+plt.xlabel("Regularisation Parameter C")
+plt.ylabel("Tuning RMSE (occupants)")
+plt.title("SVR Hyperparameter Tuning: C vs RMSE")
+plt.legend()
+plt.grid(True, alpha=0.3)
+plt.tight_layout()
+
+plt.savefig(
+    results_dir / "05_svr_hyperparameter_tuning.png",
+    dpi=200
+)
+
+
+#Extracting best params
+best_params = tuning_comparison.iloc[0]
+
+best_C=float(best_params["C"])
+best_epsilon = float(best_params["epsilon"])
+best_gamma = best_params["gamma"]
+
+print("\nBest SVR Parameters:")
+print("C:", best_C)
+print("epsilon:", best_epsilon)
+print("gamma:", best_gamma)
+
+#use best param config on full 50 000 observations
+
+svr_sample_size=500000
+
+X_svr_train = X_train.sample(
+    n=svr_sample_size,
+    random_state=42
+)
+
 y_svr_train = y_train.loc[X_svr_train.index]
 
-print("\nSupport Vector Regression")
-print("SVR training observations:", len(X_svr_train))
-print("SVR validation observations", len(X_validation))
-
-#Create the SVR model with feature scaling
 svr_model = make_pipeline(
     StandardScaler(),
     SVR(
-        kernel = "rbf", #for non-linear solving,
-        C=10,
-        epsilon=0.5,
-        gamma="scale"
+        kernel="rbf",
+        C=best_C,
+        epsilon=best_epsilon,
+        gamma=best_gamma
     )
 )
 
-#Measure training time
+print("\nTraining best SVR on", svr_sample_size, "observations")
+
 start_time = time.perf_counter()
 
-#Train SVR
 svr_model.fit(X_svr_train, y_svr_train)
+
 training_time = time.perf_counter() - start_time
 
 print(f"SVR training time: {training_time:.2f} seconds")
 
-#Generate predictions for all validation observations (not just the 5000)
+# Predict using the original G25 validation data
 prediction_start = time.perf_counter()
 
 svr_prediction = svr_model.predict(X_validation)
 
 prediction_time = time.perf_counter() - prediction_start
 
-print(f"SVR prediction time {prediction_time:.2f} seconds")
+print(f"SVR prediction time: {prediction_time:.2f} seconds")
 
-#Calculate Validation Performance
+# Calculate final validation performance
 svr_metrics = regression_metrics(
     y_validation,
     svr_prediction
 )
 
-#Additng to existing regression comparison dataframe
-metrics.loc[f"SVR (RBF, n={svr_sample_size})"] = svr_metrics
+metrics.loc[
+    f"SVR Tuned (n={svr_sample_size})"
+] = svr_metrics
 
-#report number of support vectors
 n_support_vectors = len(
     svr_model.named_steps["svr"].support_
 )
 
-print("Number of support vectors", n_support_vectors)
-print("\nSVR Validation Performance:")
+print("Number of support vectors:", n_support_vectors)
+
+print("\nTuned SVR Validation Performance:")
 print(svr_metrics)
+
+
+
 
 print("\nRegression performance:")
 print(metrics.to_string())
@@ -377,12 +526,13 @@ coefficients.to_csv(
 
 #storing validation results
 validation_results = pd.DataFrame({
-    "Timestamp" : data.loc[
+    "Timestamp": data.loc[
         X_validation.index, "Timestamp"
     ],
-    "Actual" : y_validation,
-    "Predicted" : linear_prediction,
-    "TreePredicted" : tree_prediction
+    "Actual": y_validation,
+    "Predicted": linear_prediction,
+    "TreePredicted": tree_prediction,
+    "SVRPredicted": svr_prediction
 })
 
 validation_results["Residual"] = (
@@ -392,6 +542,11 @@ validation_results["Residual"] = (
 validation_results["TreeResidual"] = (
     validation_results["Actual"]
     - validation_results["TreePredicted"]
+)
+
+validation_results["SVRResidual"] = (
+    validation_results["Actual"]
+    - validation_results["SVRPredicted"]
 )
 
 validation_results.to_csv(
@@ -439,6 +594,11 @@ plt.savefig(
 )
 
 #plotting residuals
+
+# ---------------------------------------------
+# Linear Regression Residual Plot
+# ---------------------------------------------
+
 plt.figure(figsize=(9, 5))
 
 plt.scatter(
@@ -464,6 +624,50 @@ plt.savefig(
     results_dir / "05_residuals.png",
     dpi=200
 )
+
+
+# ---------------------------------------------
+# SVR Predicted vs Actual
+# ---------------------------------------------
+
+plt.figure(figsize=(8, 6))
+
+plt.hexbin(
+    validation_results["Actual"],
+    validation_results["SVRPredicted"],
+    gridsize=55,
+    bins="log",
+    mincnt=1,
+    cmap="viridis"
+)
+
+plt.colorbar(label="Log observation count")
+
+# Perfect prediction reference line
+upper = max(
+    validation_results["Actual"].max(),
+    validation_results["SVRPredicted"].max()
+)
+
+plt.plot(
+    [0, upper],
+    [0, upper],
+    "r--",
+    label="Perfect prediction"
+)
+
+plt.xlabel("Actual headcount")
+plt.ylabel("Predicted headcount")
+plt.title("G25 SVR: Predicted vs Actual")
+plt.legend()
+plt.grid(True, alpha=0.3)
+plt.tight_layout()
+
+plt.savefig(
+    results_dir / "05_svr_predicted_vs_actual.png",
+    dpi=200
+)
+
 #decision tree residual plot
 plt.figure(figsize=(9, 5))
 
@@ -491,9 +695,40 @@ plt.savefig(
     dpi=200
 )
 
+# ---------------------------------------------
+# SVR Residual Plot
+# ---------------------------------------------
+
+plt.figure(figsize=(9, 5))
+
+plt.scatter(
+    validation_results["SVRPredicted"],
+    validation_results["SVRResidual"],
+    s=3,
+    alpha=0.15
+)
+
+plt.axhline(
+    0,
+    color="red",
+    linestyle="--"
+)
+
+plt.xlabel("Predicted headcount")
+plt.ylabel("Residual (Actual - Predicted)")
+plt.title("G25 Support Vector Regression Residuals")
+plt.grid(True, alpha=0.3)
+plt.tight_layout()
+
+plt.savefig(
+    results_dir / "05_svr_residuals.png",
+    dpi=200
+)
+
+
 #comparing predictions over time
 start = validation_results["Timestamp"].min()
-end = start + pd.Timedelta(days=2)
+end = start + pd.Timedelta(days=7)
 
 sample = validation_results[
     (validation_results["Timestamp"] >= start) &
@@ -524,6 +759,14 @@ plt.scatter(
     s=8,
     alpha=0.6,
     label=f"Decision tree (depth={best_depth})"
+)
+
+plt.scatter(
+    sample["Timestamp"],
+    sample["SVRPredicted"],
+    s=8,
+    alpha=0.6,
+    label=f"SVR (C={best_C}, epsilon={best_epsilon})"
 )
 
 plt.xlabel("Time")
