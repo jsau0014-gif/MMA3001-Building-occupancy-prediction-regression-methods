@@ -11,9 +11,14 @@ A residual plot to identify systematic patterns
 import pandas as pd
 import numpy as np
 import matplotlib.pyplot as plt
+import time
 
 from pathlib import Path
 
+from sklearn.model_selection import ParameterGrid
+from sklearn.svm import SVR
+from sklearn.preprocessing import StandardScaler
+from sklearn.pipeline import make_pipeline
 from sklearn.tree import DecisionTreeRegressor
 from sklearn.linear_model import LinearRegression
 from sklearn.model_selection import train_test_split
@@ -274,6 +279,70 @@ plt.savefig(
     results_dir / "05_leaf_size_comparison.png",
     dpi=200
 )
+
+#Setting Up SVR Regression 
+#Number of observations used to train svr
+svr_sample_size = 50000
+
+#selecting random sample from g25 traiing data
+X_svr_train = X_train.sample(
+    n=svr_sample_size,
+    random_state=42 #should pull the same 5000 data set each run
+)
+
+#select corresponding target values with mask
+y_svr_train = y_train.loc[X_svr_train.index]
+
+print("\nSupport Vector Regression")
+print("SVR training observations:", len(X_svr_train))
+print("SVR validation observations", len(X_validation))
+
+#Create the SVR model with feature scaling
+svr_model = make_pipeline(
+    StandardScaler(),
+    SVR(
+        kernel = "rbf", #for non-linear solving,
+        C=10,
+        epsilon=0.5,
+        gamma="scale"
+    )
+)
+
+#Measure training time
+start_time = time.perf_counter()
+
+#Train SVR
+svr_model.fit(X_svr_train, y_svr_train)
+training_time = time.perf_counter() - start_time
+
+print(f"SVR training time: {training_time:.2f} seconds")
+
+#Generate predictions for all validation observations (not just the 5000)
+prediction_start = time.perf_counter()
+
+svr_prediction = svr_model.predict(X_validation)
+
+prediction_time = time.perf_counter() - prediction_start
+
+print(f"SVR prediction time {prediction_time:.2f} seconds")
+
+#Calculate Validation Performance
+svr_metrics = regression_metrics(
+    y_validation,
+    svr_prediction
+)
+
+#Additng to existing regression comparison dataframe
+metrics.loc[f"SVR (RBF, n={svr_sample_size})"] = svr_metrics
+
+#report number of support vectors
+n_support_vectors = len(
+    svr_model.named_steps["svr"].support_
+)
+
+print("Number of support vectors", n_support_vectors)
+print("\nSVR Validation Performance:")
+print(svr_metrics)
 
 print("\nRegression performance:")
 print(metrics.to_string())
