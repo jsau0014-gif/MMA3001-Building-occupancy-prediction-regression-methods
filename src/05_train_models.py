@@ -304,9 +304,9 @@ X_svr_fit, X_svr_tune, y_svr_fit, y_svr_tune = train_test_split(
 
 #defining parameters to tune
 parameter_grid = {
-    "C":[100,200,400],
+    "C":[100],
     "epsilon": [1.0],
-    "gamma" : ["scale",0.3,0.6]
+    "gamma" : [0.6]
 }
 
 configurations = list(ParameterGrid(parameter_grid))
@@ -433,7 +433,7 @@ print("gamma:", best_gamma)
 
 #use best param config on full 50 000 observations
 
-svr_sample_size=50000
+svr_sample_size=len(X_train)
 
 X_svr_train = X_train.sample(
     n=svr_sample_size,
@@ -783,7 +783,7 @@ plt.savefig(
 
 print("\nResults saved to:", results_dir)
 
-plt.show()
+plt.close("all")
 
 # ---------------------------------------------
 # Save fitted G25 models for G20 validation
@@ -803,7 +803,7 @@ joblib.dump(
 
 joblib.dump(
     svr_model,
-    results_dir / "05_svr_model.joblib"
+    results_dir / "05_svr_model_full.joblib"
 )
 
 print("\nAll three fitted G25 models saved successfully.")
