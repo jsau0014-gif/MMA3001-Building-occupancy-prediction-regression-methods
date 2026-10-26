@@ -36,7 +36,7 @@ features = [
 ]
 
 #G20 observations for faster SVR prediction
-G20_SAMPLE_SIZE = 50000
+G20_SAMPLE_SIZE = 1000000
 
 RANDOM_STATE = 42
 PLOT_DAYS = 7
