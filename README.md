@@ -80,10 +80,9 @@ python -m venv .venv
 .\.venv\Scripts\Activate.ps1
 python -m pip install --upgrade pip
 python -m pip install -r requirements.txt
-python -m pip install joblib
 ```
 
-`joblib` is required for saving/loading fitted models and is included in `requirements-test.txt`; it is not yet explicitly included in `requirements.txt`. For the test suite, install `requirements-test.txt` as described below. Package versions are not pinned, so minor runtime or numerical variation can occur.
+`joblib` is included in `requirements.txt` to support saving/loading fitted models. Install `requirements-test.txt` for pytest. Package versions are not pinned, so minor runtime or numerical variation can occur.
 
 ## Reproducing the final modelling workflow
 
