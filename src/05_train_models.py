@@ -803,7 +803,7 @@ joblib.dump(
 
 joblib.dump(
     svr_model,
-    results_dir / "05_svr_model_full.joblib"
+    results_dir / "05_svr_model.joblib"
 )
 
 print("\nAll three fitted G25 models saved successfully.")
