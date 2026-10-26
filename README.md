@@ -4,73 +4,78 @@
 
 **MMA3001 — Numerical Methods and Machine Learning | Monash University | 2026**
 
-This project investigates the prediction of university room occupancy from calendar-derived features. Three regression methods—**Multiple Linear Regression**, **Decision Tree Regression**, and **Support Vector Regression (SVR)**—are trained on occupancy measurements from **Room G.25** and evaluated both on withheld G.25 observations and on an independent dataset from **Room G.20**.
+This project investigates predicting university room occupancy using only **calendar-derived temporal features**. Three methods—**Multiple Linear Regression**, **Decision Tree Regression** and **radial basis function Support Vector Regression (SVR)**—are fitted on measurements from **Room G.25**. They are evaluated both on withheld G.25 observations and on independent measurements from **Room G.20**.
 
-The project explores numerical preprocessing of irregularly sampled sensor data, cyclical feature engineering, regression accuracy, hyperparameter selection, computational cost, and **cross-room generalisation**.
+The work covers irregularly sampled sensor data, zero-order-hold integration, cyclical feature engineering, model optimisation, computational cost, numerical verification and cross-room generalisation.
 
-## Project objectives
+## Objectives
 
-- Convert irregularly timed sensor measurements into one-minute, time-weighted occupancy targets.
-- Construct seven timestamp-derived features without using contemporaneous or historical headcounts as predictors.
-- Compare linear and nonlinear regression methods against a training-mean baseline.
-- Investigate decision-tree complexity and SVR parameter selection and computational cost.
-- Assess how well models trained on G.25 transfer to the unseen room G.20.
+- Construct one-minute **time-weighted occupancy targets** from irregular sensor events.
+- Derive seven calendar features without using a measured headcount as a predictor.
+- Compare three regression methods with a training-mean baseline using MAE, RMSE and R².
+- Investigate model-complexity and computational trade-offs, particularly decision-tree leaf size and SVR fitting cost.
+- Assess whether models trained in G.25 generalise to the unseen G.20 room.
 
-## Data and numerical approach
+## Data, inputs and outputs
 
-The original occupancy dataset is stored under `Data/` and includes a large occupancy-sensor CSV tracked using **Git LFS**. Room-level records are extracted using their `floorspaceid` values.
+The original occupancy-sensor CSV is stored under `Data/` and tracked using **Git LFS**. The extraction script selects G.25 and G.20 using the original `floorspaceid` values; the main raw columns used for this project are `collecteddate` (timestamp) and `headcount` (occupants).
 
-The scripts use `collecteddate` for the timestamp and `headcount` for recorded occupancy. Invalid timestamps and nonnumeric or missing headcounts are excluded during preprocessing. For time-weighted averaging, readings are sorted chronologically, and when timestamps are duplicated the final recorded value is retained.
+Preprocessing:
 
-A **zero-order-hold** reconstruction assumes that occupancy stays constant between consecutive recorded measurements. A cumulative occupancy–time integral is evaluated at minute boundaries to calculate the time-weighted mean headcount. **Only minutes containing at least one valid original measurement are retained**; the preprocessing does not create a complete, gap-filled minute-by-minute time series. The first partial minute is normalised by its covered duration.
+1. Excludes rows with missing/invalid timestamps or nonnumeric/missing headcounts; valid zero occupancy is retained.
+2. Orders readings by time, keeping the last recorded value at duplicate timestamps.
+3. Reconstructs occupancy as piecewise constant between readings (**zero-order hold**).
+4. Integrates occupancy multiplied by duration to calculate **minute-level time-weighted mean headcount**, including correct normalisation of an initially partially observed minute.
+5. Retains **only minutes containing at least one valid original sensor reading**. It does not fill unmeasured gaps with synthetic targets.
 
-The seven model inputs, all derived from timestamps converted to **Australia/Melbourne** local time, are:
+Timestamps are converted to the `Australia/Melbourne` time zone before constructing these seven model inputs:
 
-| Feature | Meaning |
+| Input | Description |
 | --- | --- |
-| `TimeSin`, `TimeCos` | Cyclical time of day (24-hour period) |
-| `DaySin`, `DayCos` | Cyclical day of week (7-day period) |
-| `MonthSin`, `MonthCos` | Cyclical month of year (12-month period) |
-| `IsWeekend` | Binary indicator for Saturday or Sunday |
+| `TimeSin`, `TimeCos` | Sine and cosine of time of day, including fractional hour |
+| `DaySin`, `DayCos` | Sine and cosine of day of week |
+| `MonthSin`, `MonthCos` | Sine and cosine of month of year |
+| `IsWeekend` | Binary indicator: Saturday/Sunday versus weekday |
 
-The prediction target is the **one-minute time-weighted average headcount**, not a classification label or an instantaneous real-time sensor reading.
+**Prediction output:** a floating-point estimate of the **one-minute time-weighted average headcount**, in occupants. Model predictions are not constrained to be integers or physically nonnegative. Only timestamp features enter the regression models; timetables, room characteristics and previous headcounts are not inputs.
 
 ## Repository structure
 
 ```text
 .
-├── Data/                         # Original datasets and source metadata (Git LFS)
-│   └── processed/                # Generated room-level and model-ready CSVs (ignored by Git)
-├── src/                          # Extraction, preprocessing, modelling, and plotting scripts
-├── Results/                      # Locally generated metrics, predictions, figures, and models
-│   └── report_figures/           # Figures generated for the report
-├── archive/                      # Earlier exploratory scripts
-├── docs/                         # Reserved for project documentation
-├── tests/                        # Reserved for automated tests
-├── requirements.txt              # Listed Python dependencies
+├── Data/                         # Source datasets and metadata (Git LFS)
+│   └── processed/                # Generated room-level/model-ready CSVs (Git-ignored)
+├── src/                          # Extraction, preprocessing, models, validation, figures
+├── Results/                      # Generated metrics, plots, predictions and models
+│   └── report_figures/           # Final report figures (generated locally)
+├── tests/                        # Automated numerical and metric-consistency tests
+├── docs/
+│   ├── TEST_REPORT.md            # Verification methods and results
+│   ├── pytest_results.txt        # Recorded Windows test output
+│   ├── html/index.html           # Offline HTML source-code documentation
+│   └── HTML_DOCUMENTATION.md     # Documentation build instructions
+├── tools/build_html_docs.py      # Safe AST-based documentation generator
+├── archive/                      # Historical/experimental scripts
+├── LICENSE                       # MIT licence for original software
+├── DATA_LICENSE_NOTICE.md        # Dataset ownership / redistribution caveat
+├── TESTING.md                    # Detailed instructions for running tests
+├── requirements.txt              # Main dependencies
+├── requirements-test.txt         # Test dependencies and joblib
 └── README.md
 ```
 
-The `docs/` and `tests/` directories are currently placeholders; this repository does **not** yet provide a complete automated test suite. Generated `Data/processed/` datasets and `.joblib` model files are excluded from Git and must be recreated locally.
+Generated `Data/processed/` files and trained `.joblib` models are not version-controlled. The `Results/` directory may contain additional locally generated files that are not included in the remote repository. Reproduce those outputs using the workflow below.
 
-## Requirements and installation
+## Installation (Windows PowerShell)
 
-- Python 3, with `pip` and a working scientific Python environment.
-- Git and **Git LFS** to retrieve the original large CSV/XLSX files.
-- Sufficient disk space and memory for the original dataset and model artefacts. Fitting the full RBF SVR can be computationally intensive.
-
-Clone the repository:
+Prerequisites: a working Python 3 environment, `pip`, Git, Git LFS and enough free disk space/memory for the occupancy dataset. The final RBF SVR fit may take several hours.
 
 ```powershell
 git lfs install
 git clone https://github.com/jsau0014-gif/MMA3001-Building-occupancy-prediction-regression-methods.git
 cd MMA3001-Building-occupancy-prediction-regression-methods
 git lfs pull
-```
 
-Create and activate a virtual environment in **PowerShell**:
-
-```powershell
 python -m venv .venv
 .\.venv\Scripts\Activate.ps1
 python -m pip install --upgrade pip
@@ -78,108 +83,138 @@ python -m pip install -r requirements.txt
 python -m pip install joblib
 ```
 
-`joblib` is imported by the training and validation scripts but is not currently listed explicitly in `requirements.txt`, so it is installed separately above. An exact Python/package-version lockfile is not included; small numerical or runtime differences may occur between environments.
+`joblib` is required for saving/loading fitted models and is included in `requirements-test.txt`; it is not yet explicitly included in `requirements.txt`. For the test suite, install `requirements-test.txt` as described below. Package versions are not pinned, so minor runtime or numerical variation can occur.
 
-## Reproduce the workflow
+## Reproducing the final modelling workflow
 
-Run commands **from the repository root**, in the order below. The scripts derive their file paths relative to their own location, so the local name of the outer project folder does not affect them.
+Run the following commands **from the repository root**, in sequence. Script paths are resolved relative to the scripts, so renaming the local outer project folder does not affect them.
 
-### 1. Extract and inspect the two rooms
+### 1. Extract and inspect the room measurements
 
 ```powershell
 python src/01_Extract_Occupancy_Data.py
 python src/02_Inspect_Occupancy_Data.py
 ```
 
-The extraction script reads `Data/5occupancySensor_MayToDec2024_9MRows.csv` in chunks and writes:
+The extraction reads `Data/5occupancySensor_MayToDec2024_9MRows.csv` in chunks and writes `Data/processed/G25_Occupancy.csv` and `G20_Occupancy.csv`.
 
-- `Data/processed/G25_Occupancy.csv`
-- `Data/processed/G20_Occupancy.csv`
-
-### 2. Produce one-minute, time-weighted datasets
+### 2. Calculate time-weighted one-minute averages
 
 ```powershell
 python src/03_preprocess_training.py
 python src/03b_preprocess_G20.py
 ```
 
-These create `G25_Minute_Training.csv` and `G20_Minute_validation.csv` in `Data/processed/`. The scripts print occupancy statistics and display visual comparisons of original readings against minute averages.
+Outputs: `Data/processed/G25_Minute_Training.csv` and `Data/processed/G20_Minute_validation.csv`. The study retained **373,260 G.25** and **306,459 G.20** processed observations.
 
-### 3. Engineer the seven temporal input features
+### 3. Construct the model inputs
 
 ```powershell
 python src/04_feature_engineering.py
 python src/04b_feature_engineering_G20.py
 ```
 
-**Use the following minute-averaged model-ready files:**
+Use `Data/processed/G25_Model_Train.csv` for model development and `Data/processed/G20_Model_Validation_Minute.csv` for final cross-room evaluation. Script 04 also exports `G20_Model_Validation.csv` based on the original *unaggregated* G.20 readings for a legacy workflow; it is **not** the final G.20 evaluation input.
 
-- `Data/processed/G25_Model_Train.csv` — G.25 model development.
-- `Data/processed/G20_Model_Validation_Minute.csv` — independent, like-for-like G.20 evaluation.
-
-Note: `04_feature_engineering.py` also creates `G20_Model_Validation.csv` from the *raw* G.20 observations for an earlier workflow. That file is **not** the target for the final minute-averaged cross-room evaluation.
-
-### 4. Train and internally validate the models
+### 4. Fit and internally validate the three models on G.25
 
 ```powershell
 python src/05_train_models.py
 ```
 
-This script uses a **random 80% training / 20% validation split** of G.25, with `random_state=42`. It fits the linear regression, compares decision-tree minimum leaf sizes, fits an RBF SVR with scaled inputs, and reports **MAE, RMSE, and R²** relative to a training-mean baseline. Results and plots are saved under `Results/`.
+The script uses a reproducible **random 80% training / 20% validation split** (`random_state=42`): **298,608 training** and **74,652 validation** observations. It compares the training-mean baseline, fits Multiple Linear Regression, tunes a Decision Tree and fits the selected full-data RBF SVR with standardised inputs.
 
-The full G.25 training partition contains **298,608 observations**. The full-data RBF SVR can require several hours to fit, depending on the computer.
+**Model filenames are now consistent across scripts:**
 
-**Current model-filename discrepancy:** The training script saves the full SVR as `Results/05_svr_model_full.joblib`, whereas the G.20 validation script loads `Results/05_svr_model.joblib`. Before the next step, either update the SVR entry in `src/06b_validate_G20_minute.py` to reference `05_svr_model_full.joblib`, **or** make a copy of the newly trained full model using:
+| Fitted model | Saved path |
+| --- | --- |
+| Linear Regression | `Results/05_linear_model.joblib` |
+| Decision Tree | `Results/05_decision_tree.joblib` |
+| Full-training SVR | `Results/05_svr_model.joblib` |
+
+The final SVR has training shape **(298608, 7)**. An older checkpoint using the same base filename was previously trained on 50,000 observations; the full-data checkpoint was separately verified and substituted before the final cross-room run. If using locally retained historical models, check that the current SVR file is the intended full fit:
 
 ```powershell
-Copy-Item .\Results\05_svr_model_full.joblib .\Results\05_svr_model.joblib
+python -c "import joblib; m=joblib.load(r'Results\05_svr_model.joblib'); print(m.named_steps['svr'].shape_fit_)"
 ```
 
-The copy command preserves the full model and ensures that the subsequent evaluation uses that same saved fit. An older file named `05_svr_model.joblib` may otherwise refer to an earlier, smaller training experiment.
+Expected: `(298608, 7)`. Re-running Script 05 recreates the full fit, but can take several hours.
 
-### 5. Perform independent G.20 validation
+### 5. Evaluate independent G.20 measurements
 
 ```powershell
 python src/06b_validate_G20_minute.py
 ```
 
-The three saved G.25 models predict **G.20 without retraining**. The script records MAE, RMSE, R², mean residual (`actual − predicted`), prediction runtime, and plots. Its current `G20_SAMPLE_SIZE` setting exceeds the processed dataset size, so it evaluates **all 306,459 available G.20 minute observations**.
+This loads the already fitted G.25 models and predicts G.20 **without retraining or G.20-based parameter adjustment**. The script's sampling cap is larger than the processed dataset, so it evaluates **all 306,459 G.20 observations**. It saves:
 
-Outputs include:
+- `Results/06b_G20model_comparison.csv` — MAE, RMSE, R², mean residual and prediction time.
+- `Results/06b_G20validation_predictions.csv` — timestamped actual and predicted occupancy with residuals.
+- Actual-versus-predicted, residual and occupancy plots.
 
-- `Results/06b_G20model_comparison.csv`
-- `Results/06b_G20validation_predictions.csv`
-- Actual-versus-predicted, residual, and occupancy-over-time figures.
+The older `src/06_validate_G20.py` evaluates unaggregated G.20 observations and is **not** part of the final like-for-like minute-averaged comparison.
 
-For this final comparison, do **not** substitute the older `src/06_validate_G20.py`, which evaluates the unaggregated G.20 target using a different workflow.
-
-### 6. Generate figures for the report
+### 6. Generate report figures
 
 ```powershell
 python src/07_generate_report_figures.py
 ```
 
-Figures are generated in `Results/report_figures/` (with a fallback to `Results/` if a figure cannot be saved there). This stage uses saved outputs from previous stages; it does not refit the models. Some optional figures require historical comparison files from earlier experiments, such as `Results/05_model_comparison_100k.csv`, and are skipped when those files are absent.
+Report graphics are generated under `Results/report_figures/`. The script reads previously saved model outputs rather than refitting any model. Some optional figures use experimental comparison CSVs from earlier iterations (such as a 100,000-observation SVR experiment) and may be omitted if those files are absent.
 
-## Validation and key findings
+## Final numerical results
 
-The final study used **373,260 processed G.25 observations** and **306,459 processed G.20 observations**. Internal evaluation used a shuffled split within G.25; independent evaluation used the separately preprocessed G.20 room.
+The reported internal and independent evaluation results are:
 
-- **Decision Tree Regression** achieved the best internal G.25 RMSE (**1.6633 occupants**; R² **0.3424**).
-- G.20 cross-room validation was notably weaker: RMSE was **3.8183** for Linear Regression, **3.8390** for Decision Tree Regression, and **3.8788 occupants** for the reported SVR evaluation. All G.20 R² values were negative, and all models showed positive mean residuals (systematic underprediction).
-- The results suggest that timestamp-only inputs describe some recurring utilisation patterns but do not reliably capture class-specific or irregular high-occupancy events.
+| Model | G.25 internal RMSE (occupants) | G.25 internal R² | G.20 external RMSE (occupants) | G.20 external R² |
+| --- | ---: | ---: | ---: | ---: |
+| Linear Regression | 1.8931 | 0.1481 | **3.8183** | −0.0400 |
+| Decision Tree | **1.6633** | **0.3424** | 3.8390 | −0.0513 |
+| SVR (298,608 G.25 training observations) | 1.7260 | 0.2919 | 3.8760 | −0.0716 |
 
-**Comparability note:** Results depend on the particular saved SVR checkpoint. The G.20 figures quoted above are from the recorded full-room validation run; when reproducing the work, ensure the validation script points to the intended SVR fit and report the checkpoint used.
+G.20 full-model validation used 306,459 processed observations. Its final SVR metrics were **MAE 1.901582, RMSE 3.875962, R² −0.071607 and mean residual +1.208271 occupants**. Prediction took **1,579.29 seconds** on the reported run (versus approximately 0.17 seconds for Linear Regression and 0.02 seconds for the Decision Tree).
 
-## Limitations and reproducibility notes
+Decision Tree Regression performed best on internal G.25 validation, but Linear Regression achieved the lowest G.20 RMSE. All G.20 R² values were negative and all three models systematically underpredicted occupancy. Temporal features alone could not reliably capture high-occupancy events or transfer across rooms.
 
-- The zero-order-hold assumption may be inaccurate across long intervals between sensor readings.
-- Minutes without valid original measurements are excluded; the resulting dataset is **not** a continuous occupancy record.
-- A random within-room split can place temporally related observations in both subsets. It is not a chronological forecast evaluation.
-- Cross-room performance may differ because rooms have different utilisation patterns, timetables, and occupancy distributions; these variables are not model inputs.
-- The repository does not include automated regression tests or pinned package versions. The preprocessing scripts print diagnostic statistics and show visual checks, but these are not a substitute for formal verification tests.
-- Original data is tracked with Git LFS; generated datasets and trained `.joblib` models are not committed. Large exported per-observation prediction CSVs are also best regenerated locally rather than uploaded unnecessarily.
+## Automated numerical tests
+
+A `pytest` suite under [`tests/`](tests/) tests analytical and random-reference zero-order-hold averaging, duplicate and invalid timestamps, initial partial minutes, missing-minute handling, temporal feature invariants and recomputation of final G.20 model metrics.
+
+The recorded **Windows / Python 3.13.14** run in [`docs/pytest_results.txt`](docs/pytest_results.txt) produced **19 passed, 0 failed, 0 skipped (14.98 seconds)**. The full methodology and limitations are documented in [`docs/TEST_REPORT.md`](docs/TEST_REPORT.md) and [`TESTING.md`](TESTING.md).
+
+Run or refresh the suite:
+
+```powershell
+python -m pip install -r requirements-test.txt
+python -m pytest tests -v -rA
+python -m pytest tests -v -rA *> docs/pytest_results.txt
+```
+
+The three exported-metric tests need the locally generated G.20 predictions and comparison CSVs; without them they **skip**, and that is not equivalent to a pass. The tests check numerical implementation and exported-metric consistency, not sensor truth, model-checkpoint size or independent forecast validity.
+
+## HTML documentation
+
+An offline, navigable, source-linked HTML reference for all **11 scripts** is available at [`docs/html/index.html`](docs/html/index.html). It includes script input/output information, source listings, function signatures, assumptions and limitations.
+
+Generate the documentation from your currently checked-out source code (without importing scripts or running the costly models):
+
+```powershell
+python tools/build_html_docs.py
+Start-Process .\docs\html\index.html
+```
+
+The AST-based generator is documented in [`docs/HTML_DOCUMENTATION.md`](docs/HTML_DOCUMENTATION.md).
+
+## Limitations and reproducibility
+
+- Zero-order hold is an assumption; measurements between events are unobserved and long gaps increase uncertainty.
+- Only minutes with valid raw events are retained. The dataset is not a continuous, fully observed minute series.
+- Random G.25 validation can include temporally correlated records in both subsets; it does not demonstrate genuine future-period forecasting. The validation subset also informed model selection.
+- G.20 shows different occupancy characteristics, and room-specific schedules and characteristics are not provided to the models.
+- The nonlinear methods did not consistently generalise better than Linear Regression, despite additional computational cost.
+- Source datasets may have separate ownership or redistribution conditions; see [`DATA_LICENSE_NOTICE.md`](DATA_LICENSE_NOTICE.md). **The MIT [`LICENSE`](LICENSE) covers original project code, not third-party datasets or their contents.**
+- Git LFS may be required to retrieve original large inputs. Processed CSVs, fitted models and many generated outputs must be recreated locally.
 
 ## Academic context
 
-Developed for **MMA3001 — Numerical Methods and Machine Learning**, Monash University (2026). The accompanying report contains further details on the numerical method, hyperparameter experiments, model comparison, engineering implications, and critical reflection on AI-assisted development.
+Developed for **MMA3001 — Numerical Methods and Machine Learning**, Monash University (2026). The accompanying report provides detailed methods, validation, optimisation, limitations, engineering implications and a critical reflection on AI use.
