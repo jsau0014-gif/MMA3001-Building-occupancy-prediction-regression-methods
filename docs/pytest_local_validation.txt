@@ -1,0 +1,14 @@
+Independent local dry-run summary, 26 October 2026
+Python 3.13.5; pytest 9.0.2; pandas 2.2.3; numpy 2.3.5; matplotlib 3.10.8
+
+Command: PYTEST_DISABLE_PLUGIN_AUTOLOAD=1 python -m pytest tests -q -rA --disable-warnings
+Output: ................sss
+
+16 passed, 3 skipped in 30.14s
+
+The 3 optional full-data result-metric tests were skipped because their
+required Results/ CSVs were absent from the isolated testing environment.
+
+IMPORTANT: This execution used a faithful local mirror of the GitHub numerical
+logic. For final evidence, copy tests/ into the actual Windows project and
+run `python -m pytest tests -v -rA`, saving its output to docs/pytest_results.txt.
