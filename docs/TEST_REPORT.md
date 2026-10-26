@@ -2,84 +2,110 @@
 
 **Project:** Predicting Building Occupancy Using Machine Learning: A Comparative Study of Regression Methods  
 **Unit:** MMA3001 — Numerical Methods and Machine Learning  
-**Report date:** 26 October 2026  
+**Report updated:** 26 October 2026  
 **Repository:** https://github.com/jsau0014-gif/MMA3001-Building-occupancy-prediction-regression-methods
 
 ## 1. Objective and scope
 
-The aim was to verify that the numerical preprocessing and temporal feature-engineering algorithms produce the correct results for known inputs, separately from evaluating the predictive accuracy of the trained models. The tests exercise both room-specific preprocessing scripts (`03_preprocess_training.py` and `03b_preprocess_G20.py`) and both relevant feature-engineering scripts (`04_feature_engineering.py` and `04b_feature_engineering_G20.py`). They do not require the original, multi-gigabyte sensor dataset or re-training the SVR.
+This test suite verifies that numerical preprocessing and temporal feature engineering produce expected outputs for known inputs, separately from assessing predictive performance on measured occupancy data. It tests the actual room-specific preprocessing scripts (`src/03_preprocess_training.py` and `src/03b_preprocess_G20.py`) and both feature-engineering workflows (`src/04_feature_engineering.py` and `src/04b_feature_engineering_G20.py`).
 
-Tests execute project scripts in **isolated temporary folders** containing synthetic CSV files. The actual sensor datasets and training outputs are not modified. Expected occupancy averages are established using analytical sums of occupancy × duration. A separate, independently written interval-walking implementation is also used as a numerical reference for a reproducible randomized scenario.
+Tests run the production scripts in isolated temporary directories with small synthetic CSV files, without modifying the original occupancy datasets or trained models. Exact occupancy averages are checked against analytical occupancy-duration calculations; an independently implemented interval-walking reference provides an additional randomized comparison.
 
-## 2. Execution environment and scope of this run
+Three further tests independently recompute the exported G.20 evaluation metrics from saved predictions. These verify **consistency of the reported calculations**, not predictive validity or the provenance of a saved model checkpoint.
 
-| Item | Value |
+## 2. Recorded test environment and execution
+
+The definitive repository evidence is the student's local Windows run in [`docs/pytest_results.txt`](pytest_results.txt).
+
+| Property | Recorded result |
 | --- | --- |
-| Verification environment | Linux, Python 3.13.5 |
-| Framework | pytest 9.0.2 |
-| Numerical libraries | pandas 2.2.3, NumPy 2.3.5, Matplotlib 3.10.8 |
-| Evaluation library | scikit-learn 1.8.0 |
-| Input data | Small, synthetic CSV measurements with predefined headcounts |
-| Time representation | UTC input timestamps, converted to `Australia/Melbourne` for model features |
-| Test execution | `python -m pytest tests -q -rA` |
+| Operating system | Windows (`win32`) |
+| Python | 3.13.14 |
+| pytest | 9.1.1 |
+| pluggy | 1.7.0 |
+| Command | `python -m pytest tests -v -rA` |
+| Tests collected | **19** |
+| Passed / failed / skipped | **19 / 0 / 0** |
+| Execution duration | **14.98 seconds** |
+| Data for numerical tests | Synthetic readings with known reference answers |
+| Data for metric-consistency tests | Locally exported G.20 prediction and comparison CSV files |
+| Timestamp interpretation | UTC source timestamps converted to `Australia/Melbourne` for temporal features |
 
-**Evidence qualification:** This ChatGPT-session run used a local working mirror of the numerical logic retrieved from the current GitHub source, since the complete Git repository was not mounted in the test container. The delivered tests are designed to execute the **actual, unmodified scripts from `src/`** when copied into the student's local Git repository. Re-run the suite there and attach its console output as the definitive evidence for the submitted repository. The output file `docs/pytest_local_validation.txt` is evidence of the local dry run, not a claim of having tested the student's Windows working tree.
+The committed console log shows that all 19 tests ran against the local project, including the three G.20 metric-consistency tests that were unavailable in the preliminary, isolated test environment. The log is evidence for that recorded run; if data or implementation files subsequently change, rerun the suite and commit the new log.
 
 ## 3. Test cases and results
 
-| ID | Test and expected result | Rooms | Local dry-run result |
+| ID | Test and expected result | Coverage | Windows result |
 | --- | --- | --- | --- |
-| N01 | Exact zero-order-hold rectangle integration; a duplicate timestamp takes the final recorded value. First minute = **4.166667 occupants**; next minute = **2.333333 occupants**. | G.25, G.20 | PASS (2) |
-| N02 | Initial partially covered minute: `(2×20 + 6×30)/50` = **4.4 occupants** rather than dividing by a full 60 seconds. | G.25, G.20 | PASS (2) |
-| N03 | A minute with no valid raw reading is not synthesized. When readings occur in minutes 0 and 2, only those minutes are exported. | G.25, G.20 | PASS (2) |
-| N04 | Invalid timestamps and non-numeric headcounts are excluded; valid zero occupancy is preserved. | G.25, G.20 | PASS (2) |
-| N05 | A single reading is held to the end of its retained minute; a headcount of 7 produces a minute average of 7. | G.25, G.20 | PASS (2) |
-| N06 | Numerically compare event-based integration with an independently written ZOH rectangle-summing oracle on seeded randomly timed readings, including duplicated times. | G.25, G.20 | PASS (2) |
-| F01 | Calendar encoding uses Melbourne local time; check midnight, Sunday/weekend and December–January boundary. | G.25 | PASS |
-| F02 | Identical timestamps generate identical seven features in G.25, raw G.20 and minute-averaged G.20. | Both | PASS |
-| F03 | Each sine/cosine feature pair satisfies `sin² + cos² = 1` to floating-point precision. | G.25 | PASS |
-| F04 | Invalid timestamps do not enter the final model feature table. | G.25 | PASS |
-| M01–M03 | Recalculate MAE, RMSE, R², signed mean residual and optional residual columns from saved G.20 prediction records and compare with the reported comparison CSV. | G.20 | SKIPPED (3): generated CSVs unavailable in local dry run |
+| N01 | Exact zero-order-hold rectangle integration and duplicate timestamps (retain last reading): first minute **4.166667**, following minute **2.333333** occupants | G.25 and G.20 | **PASS (2)** |
+| N02 | Initial partial minute uses measured duration: `(2×20 + 6×30)/50 = 4.4` occupants | G.25 and G.20 | **PASS (2)** |
+| N03 | Minutes containing no valid recorded measurement are not synthesized | G.25 and G.20 | **PASS (2)** |
+| N04 | Invalid timestamps and nonnumeric headcounts are excluded; zero occupancy is preserved | G.25 and G.20 | **PASS (2)** |
+| N05 | One reading held to the end of its minute yields the recorded headcount (7 occupants) | G.25 and G.20 | **PASS (2)** |
+| N06 | Seeded, irregularly spaced readings agree with an independently written interval-integration reference, including duplicates | G.25 and G.20 | **PASS (2)** |
+| F01 | Melbourne-local calendar encoding at midnight, weekends and month/year boundaries | G.25 | **PASS** |
+| F02 | Identical timestamps produce identical seven engineered features across room workflows | Both | **PASS** |
+| F03 | Sine/cosine feature pairs satisfy `sin² + cos² = 1` within floating-point tolerance | G.25 | **PASS** |
+| F04 | Invalid timestamps are omitted from the resulting feature table | G.25 | **PASS** |
+| M01 | Recompute Linear Regression MAE, RMSE, R², signed mean residual and residual consistency from exported G.20 predictions | G.20 | **PASS** |
+| M02 | Recompute the same metrics for Decision Tree Regression | G.20 | **PASS** |
+| M03 | Recompute the same metrics for SVR | G.20 | **PASS** |
 
 ### Example analytical verification (N01)
 
-For occupancy readings of 2 occupants at 00:00:00, 6 at 00:00:20 and 4 at 00:00:45, the analytical zero-order-hold minute average is:
+For readings of two occupants at 00:00:00, six at 00:00:20 and four at 00:00:45, the analytical mean under zero-order hold is
 
-\[
-\overline{H}=\frac{2(20)+6(25)+4(15)}{60}=4.166667\text{ occupants}.
-\]
+```text
+(2 × 20 + 6 × 25 + 4 × 15) / 60 = 4.166667 occupants
+```
 
-The fixture also includes an earlier duplicate reading at 00:00:20 with a different value; the last valid observation at that timestamp takes precedence. The subsequent minute contains 3 occupants for 40 seconds followed by 1 occupant for 20 seconds, giving `140/60 = 2.333333` occupants. These expected values were matched within numerical floating-point tolerance in the local dry run.
+The fixture includes an earlier conflicting reading at 00:00:20; the final observation at that timestamp is retained. In the next minute, occupancy is three for 40 seconds and one for 20 seconds, so the expected average is `(3×40 + 1×20)/60 = 2.333333`. Both room-specific preprocessing scripts matched these known results within numerical tolerance.
 
-### Local dry-run outcome
+### Results summary
 
-| Status | Number |
+| Status | Count |
 | --- | ---: |
-| **Passed** | **16** |
-| **Failed** | **0** |
-| Skipped (full-data metric checks) | 3 |
-| Total collected | 19 |
+| **Passed** | **19** |
+| Failed | 0 |
+| Skipped | 0 |
+| **Total** | **19** |
 
-The optional metrics tests should run on the student's Windows machine once the final `Results/06b_G20validation_predictions.csv` and `Results/06b_G20model_comparison.csv` are available. A passing comparison checks the internal consistency of those reported metrics, not the model's independent predictive validity.
+## 4. Saved SVR checkpoint consistency
 
-## 4. Known issues and limitations
+An earlier review found that `05_train_models.py` saved the final SVR to `05_svr_model_full.joblib`, whereas `06b_validate_G20_minute.py` loaded `05_svr_model.joblib`. Inspection of the earlier loaded checkpoint showed a fitted shape of **(50,000, 7)**, while the full saved checkpoint had **(298,608, 7)**.
 
-1. **Potential saved-model inconsistency (requires resolution).** The checked training script saved its full-data SVR as `Results/05_svr_model_full.joblib`, but the cross-room validation script loaded `Results/05_svr_model.joblib`. This can mean the report's full-data G.25 SVR result and its G.20 result come from *different fitted SVRs*. Align the filenames and re-run the G.20 evaluation before declaring final consistent model performance. If the results change, update the report tables/figures.
-2. **Negative headcounts are not explicitly rejected.** Current preprocessing drops missing/non-numeric values but does not reject negative numeric headcounts. A physical input-validation check such as `headcount >= 0` is recommended, alongside a dedicated test, if the source dataset may contain negative values.
-3. **Unmeasured periods remain uncertain.** Tests establish correctness **under the zero-order-hold reconstruction**; they cannot show that occupancy actually stayed constant between sensor events, especially over long gaps.
-4. **No full-model retraining in these tests.** The large SVR took several hours to fit. The suite instead verifies the fast mathematical stages and, if available, recomputes metrics from the saved full-data predictions.
-5. **Random internal validation is not a chronological generalisation test.** Model validation results and their methodological limitations remain documented in the main report.
+The training script was subsequently updated to save its full-training-set SVR as `Results/05_svr_model.joblib`. The full checkpoint was copied to that filename locally, and the user reran G.20 evaluation with the full model. The final reported SVR G.20 metrics were:
 
-## 5. How to reproduce and archive evidence
+| Metric | Full-model G.20 validation |
+| --- | ---: |
+| Evaluation observations | 306,459 |
+| MAE | 1.901582 |
+| RMSE | 3.875962 |
+| R² | −0.071607 |
+| Mean residual (actual − predicted) | +1.208271 |
+| Prediction time | 1,579.286926 seconds |
 
-From the repository root in PowerShell:
+**Important scope distinction:** Tests M01–M03 verify that the values in the locally saved prediction and comparison CSV files agree. They do not independently prove the trained checkpoint contains 298,608 observations; that was checked separately using `SVR.shape_fit_`. Keep the refreshed G.20 CSVs and test log together when archiving final evidence.
+
+## 5. Known limitations
+
+1. **Numerical correctness is conditional on the model assumptions.** Zero-order hold may not describe true occupancy between widely spaced readings. The tests cannot independently establish sensor accuracy or ground-truth occupancy.
+2. **Negative numeric headcounts are not explicitly rejected by the preprocessing scripts.** Invalid and missing values are excluded, but nonnegative-domain enforcement would need an additional check and test.
+3. **The suite does not retrain the full SVR.** That would take hours; instead, it checks the numerical workflow and recomputes metrics from saved predictions.
+4. **Random internal validation is not temporal forecasting validation.** Nearby G.25 observations can occur in both training and validation subsets, and the same validation partition informs model selection. Cross-room G.20 evaluation checks transfer to a different room but not future chronological robustness.
+5. **CSV metric consistency does not guarantee engineering adequacy.** Negative G.20 R² and systematic underprediction limit the usefulness of the models for safety- or capacity-critical occupancy control.
+
+## 6. Reproducing and preserving evidence
+
+Run the following commands at the project root in Windows PowerShell:
 
 ```powershell
 python -m pip install -r requirements-test.txt
-python -m pytest tests -v
+python -m pytest tests -v -rA
 python -m pytest tests -v -rA *> docs/pytest_results.txt
+Get-Content docs/pytest_results.txt -Tail 5
 ```
 
-Review the `pytest_results.txt` file and record the actual pass/fail/skip totals and relevant software versions. Resolve any failures before claiming complete numerical verification. Commit the `tests/` scripts, this report and the successful run log to GitHub.
+The three metric-consistency tests require both the exported G.20 prediction CSV and corresponding summary CSV in the local `Results/` folder. If those files are unavailable, the three tests are skipped rather than failed. Run `src/06b_validate_G20_minute.py` to regenerate them, after ensuring the correct full SVR model is loaded.
 
-A pytest test report and test cases provide meaningful evidence of implementation correctness; they do **not** alone establish the accuracy of occupancy ground truth or justify the operational use of the trained regression models.
+The saved console log, this report, and the test scripts should be committed together. Successful tests demonstrate important implementation and reporting consistency, but do not on their own prove reliable real-world occupancy prediction.
