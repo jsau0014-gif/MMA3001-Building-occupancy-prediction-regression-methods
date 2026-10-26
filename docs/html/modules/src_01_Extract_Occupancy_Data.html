@@ -1,0 +1,95 @@
+<!doctype html>
+<html lang="en"><head><meta charset="utf-8"><meta name="viewport" content="width=device-width,initial-scale=1">
+<title>01 · Extract room records | MMA3001 Source Documentation</title>
+<meta name="description" content="Numerical methods and machine learning source documentation for Building Occupancy Prediction at Monash University.">
+<link rel="stylesheet" href="../assets/style.css"></head><body>
+<div class="shell"><aside class="side"><div class="brand"><small>MMA3001 · 2026</small>Building Occupancy<br>Source Documentation</div>
+<div class="side-links"><a href="../index.html" class="">Overview &amp; workflow</a><div class="subhead">Main source modules</div><a class="active" href="../modules/src_01_Extract_Occupancy_Data.html">01_Extract_Occupancy_Data.py</a><a class="" href="../modules/src_02_Inspect_Occupancy_Data.html">02_Inspect_Occupancy_Data.py</a><a class="" href="../modules/src_03_preprocess_training.html">03_preprocess_training.py</a><a class="" href="../modules/src_03b_preprocess_G20.html">03b_preprocess_G20.py</a><a class="" href="../modules/src_04_feature_engineering.html">04_feature_engineering.py</a><a class="" href="../modules/src_04b_feature_engineering_G20.html">04b_feature_engineering_G20.py</a><a class="" href="../modules/src_05_train_models.html">05_train_models.py</a><a class="" href="../modules/src_06b_validate_G20_minute.html">06b_validate_G20_minute.py</a><a class="" href="../modules/src_07_generate_report_figures.html">07_generate_report_figures.py</a><div class="subhead">Earlier implementations</div><a href="../modules/src_03_Preprocess_hourly.html" class="">03_Preprocess_hourly.py</a><a href="../modules/src_06_validate_G20.html" class="">06_validate_G20.py</a><div class="subhead">Other resources</div><a href="https://github.com/jsau0014-gif/MMA3001-Building-occupancy-prediction-regression-methods/tree/main/tests">Pytest source ↗</a><a href="https://github.com/jsau0014-gif/MMA3001-Building-occupancy-prediction-regression-methods/blob/main/docs/TEST_REPORT.md">Test report ↗</a><a href="https://github.com/jsau0014-gif/MMA3001-Building-occupancy-prediction-regression-methods/blob/main/README.md">README &amp; setup ↗</a></div></aside><main class="main">
+    <div class="breadcrumb"><a href="../index.html">Overview</a> / src/01_Extract_Occupancy_Data.py</div>
+    <div class="eyebrow">Source module · Data extraction</div>
+    <h1>01 · Extract room records</h1>
+    <p class="lead">Reads the source occupancy CSV in 100,000-row chunks, selects floorspace IDs for G.25 and G.20, and appends the matching sensor records to room-specific CSV files.</p>
+    <div><span class="tag ">Data extraction</span> <span class="small muted">76 lines indexed locally</span> ·
+    <a target="_blank" rel="noopener" href="https://github.com/jsau0014-gif/MMA3001-Building-occupancy-prediction-regression-methods/blob/main/src/01_Extract_Occupancy_Data.py">View current source on GitHub ↗</a></div>
+    <div class="cards">
+    <section class="card"><h3>Required inputs</h3><ul class="path-list"><li><code>Data/5occupancySensor_MayToDec2024_9MRows.csv</code></li></ul></section>
+    <section class="card"><h3>Files and results produced</h3><ul class="path-list"><li><code>Data/processed/G25_Occupancy.csv</code></li><li><code>Data/processed/G20_Occupancy.csv</code></li></ul></section>
+    </div><div class="warn"><strong>Usage notes and limitations</strong><ul><li>Requires the original large occupancy dataset and Git LFS materialisation.</li></ul></div><h2>Function reference</h2><p>This module implements its principal operations at top level. Executing the script triggers its workflow; it is not a callable API module. See the input/output contract above and the GitHub source.</p><h2>Source listing</h2><p class="muted small">The source below is a static copy from the local working tree at the time documentation was built; refresh after code changes.</p><details><summary>Expand full source code (HTML escaped)</summary><pre><code>&quot;&quot;&quot;
+ This script extracts the occupancy data from rooms g20 and g25 with Space ID&#x27;s  cca1ac3e-f81f-4ebb-aa2b-8b0bf3e9e53b and 227f1068-9e41-469f-bef0-275f27a0bdba respectively
+    It runs in chunks to avoid memory issues and tracks the numbers of extractions completed
+ &quot;&quot;&quot;
+
+import pandas as pd
+from pathlib import Path
+
+#Defining the project directiory
+project_dir = Path(__file__).resolve().parent.parent
+
+#defining the occupancy file
+occupancy_file = (project_dir/ &quot;Data&quot; /&quot;5occupancySensor_MayToDec2024_9MRows.csv&quot;)
+
+#setting the output directory
+output_dir = project_dir / &quot;Data&quot; / &quot;processed&quot;
+output_dir.mkdir(parents=True, exist_ok=True)
+
+#setting room keys
+
+rooms = {
+ &quot;G20&quot;:&quot;cca1ac3e-f81f-4ebb-aa2b-8b0bf3e9e53b&quot;,
+ &quot;G25&quot;:&quot;227f1068-9e41-469f-bef0-275f27a0bdba&quot;
+}
+
+#tracking the number of measurements extracted setting it to 0 initially
+counts = {room: 0 for room in rooms}
+
+
+#Tracking whether data has been written to the output CSV for each room
+first_write = {room: True for room in rooms}
+
+#Extracting the occupancy file in chunks, so that memory isnt overloaded
+
+for chunk in pd.read_csv(
+ occupancy_file,
+ chunksize=100000,
+ dtype={&quot;floorspaceid&quot;:str}
+):
+
+ for room, space_id in rooms.items():
+
+  #extract records for the called room
+  room_data = chunk[
+   chunk[&quot;floorspaceid&quot;] == space_id
+  ].copy()
+
+  if room_data.empty:
+   continue
+
+  #add the room name
+  room_data[&quot;Room&quot;] = room
+
+  #setting output location
+  output_file = output_dir / f&quot;{room}_Occupancy.csv&quot;
+
+  #save each chunk after it is processed
+  room_data.to_csv(
+   output_file,
+   mode=&quot;w&quot; if first_write[room] else &quot;a&quot;,
+   header=first_write[room],
+   index=False
+  )
+
+  first_write[room] = False
+
+  counts[room] += len(room_data)
+
+#displaying data exxtraction summary
+print(&quot;\nOccupancy extraction completed&quot;)
+
+for room in rooms:
+ print(f&quot;{room}: {counts[room]:,} records&quot;)
+
+print(f&quot;\nFiles saved in: {output_dir}&quot;)
+
+</code></pre></details>
+<footer>Generated by <code>tools/build_html_docs.py</code>. Source links refer to the GitHub <code>main</code> branch. Code is documented by parsing Python source; modules are not imported or executed.</footer></main></div>
+</body></html>

@@ -1,0 +1,72 @@
+<!doctype html>
+<html lang="en"><head><meta charset="utf-8"><meta name="viewport" content="width=device-width,initial-scale=1">
+<title>02 · Inspect extracted measurements | MMA3001 Source Documentation</title>
+<meta name="description" content="Numerical methods and machine learning source documentation for Building Occupancy Prediction at Monash University.">
+<link rel="stylesheet" href="../assets/style.css"></head><body>
+<div class="shell"><aside class="side"><div class="brand"><small>MMA3001 · 2026</small>Building Occupancy<br>Source Documentation</div>
+<div class="side-links"><a href="../index.html" class="">Overview &amp; workflow</a><div class="subhead">Main source modules</div><a class="" href="../modules/src_01_Extract_Occupancy_Data.html">01_Extract_Occupancy_Data.py</a><a class="active" href="../modules/src_02_Inspect_Occupancy_Data.html">02_Inspect_Occupancy_Data.py</a><a class="" href="../modules/src_03_preprocess_training.html">03_preprocess_training.py</a><a class="" href="../modules/src_03b_preprocess_G20.html">03b_preprocess_G20.py</a><a class="" href="../modules/src_04_feature_engineering.html">04_feature_engineering.py</a><a class="" href="../modules/src_04b_feature_engineering_G20.html">04b_feature_engineering_G20.py</a><a class="" href="../modules/src_05_train_models.html">05_train_models.py</a><a class="" href="../modules/src_06b_validate_G20_minute.html">06b_validate_G20_minute.py</a><a class="" href="../modules/src_07_generate_report_figures.html">07_generate_report_figures.py</a><div class="subhead">Earlier implementations</div><a href="../modules/src_03_Preprocess_hourly.html" class="">03_Preprocess_hourly.py</a><a href="../modules/src_06_validate_G20.html" class="">06_validate_G20.py</a><div class="subhead">Other resources</div><a href="https://github.com/jsau0014-gif/MMA3001-Building-occupancy-prediction-regression-methods/tree/main/tests">Pytest source ↗</a><a href="https://github.com/jsau0014-gif/MMA3001-Building-occupancy-prediction-regression-methods/blob/main/docs/TEST_REPORT.md">Test report ↗</a><a href="https://github.com/jsau0014-gif/MMA3001-Building-occupancy-prediction-regression-methods/blob/main/README.md">README &amp; setup ↗</a></div></aside><main class="main">
+    <div class="breadcrumb"><a href="../index.html">Overview</a> / src/02_Inspect_Occupancy_Data.py</div>
+    <div class="eyebrow">Source module · Input quality review</div>
+    <h1>02 · Inspect extracted measurements</h1>
+    <p class="lead">Parses timestamps as UTC and converts to Australia/Melbourne before reporting the coverage and distributions of each room. Does not train a model.</p>
+    <div><span class="tag ">Input quality review</span> <span class="small muted">54 lines indexed locally</span> ·
+    <a target="_blank" rel="noopener" href="https://github.com/jsau0014-gif/MMA3001-Building-occupancy-prediction-regression-methods/blob/main/src/02_Inspect_Occupancy_Data.py">View current source on GitHub ↗</a></div>
+    <div class="cards">
+    <section class="card"><h3>Required inputs</h3><ul class="path-list"><li><code>Data/processed/G25_Occupancy.csv</code></li><li><code>Data/processed/G20_Occupancy.csv</code></li></ul></section>
+    <section class="card"><h3>Files and results produced</h3><ul class="path-list"><li><code>Console summaries of dates, headcounts, occupancy status and missing values</code></li></ul></section>
+    </div><h2>Function reference</h2><p>This module implements its principal operations at top level. Executing the script triggers its workflow; it is not a callable API module. See the input/output contract above and the GitHub source.</p><h2>Source listing</h2><p class="muted small">The source below is a static copy from the local working tree at the time documentation was built; refresh after code changes.</p><details><summary>Expand full source code (HTML escaped)</summary><pre><code>&quot;&quot;&quot;
+    Inspecting the extracted data to guage what time domain each room has, 
+    the spread of occupancy and status data across the domain
+&quot;&quot;&quot;
+
+import pandas as pd
+from pathlib import Path
+
+
+#locating project directory
+
+project_dir = Path(__file__).resolve().parent.parent
+
+#processing both room g20 and g25
+rooms = [&quot;G20&quot;,&quot;G25&quot;]
+
+for room in rooms:
+
+    file = project_dir / &quot;Data&quot; / &quot;processed&quot; / f&quot;{room}_Occupancy.csv&quot;
+
+    #load the extracted room occupancy data
+    data = pd.read_csv(file)
+
+    #convert time stamps into normalised melbourne time
+    data[&quot;Timestamp&quot;] = pd.to_datetime(
+        data[&quot;collecteddate&quot;],
+        utc=True,
+        errors=&quot;coerce&quot;
+    ).dt.tz_convert(&quot;Australia/Melbourne&quot;)
+
+    print(f&quot;\n========== {room} ==========&quot;)
+
+    #Total Measurments
+    print(&quot;\nFirst Measurement:&quot;)
+    print(data[&quot;Timestamp&quot;].min())
+
+    print(&quot;\nLast measurement:&quot;)
+    print(data[&quot;Timestamp&quot;].max())
+
+    #Headcount distribution
+    print(&quot;\nHeadcount distribution:&quot;)
+    print(data[&quot;headcount&quot;].value_counts().sort_index())
+
+    #occupancy status distribution
+    print(&quot;\nOccupancy status distribution:&quot;)
+    print(data[&quot;occupancystatus&quot;].value_counts())
+
+    # Missing values
+    print(&quot;\nMissing values:&quot;)
+    print(
+        data[[&quot;Timestamp&quot;, &quot;headcount&quot;, &quot;occupancystatus&quot;]]
+        .isna()
+        .sum()
+    )</code></pre></details>
+<footer>Generated by <code>tools/build_html_docs.py</code>. Source links refer to the GitHub <code>main</code> branch. Code is documented by parsing Python source; modules are not imported or executed.</footer></main></div>
+</body></html>

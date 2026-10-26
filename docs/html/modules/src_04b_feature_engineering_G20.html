@@ -1,0 +1,138 @@
+<!doctype html>
+<html lang="en"><head><meta charset="utf-8"><meta name="viewport" content="width=device-width,initial-scale=1">
+<title>04b · Engineer G.20 validation inputs | MMA3001 Source Documentation</title>
+<meta name="description" content="Numerical methods and machine learning source documentation for Building Occupancy Prediction at Monash University.">
+<link rel="stylesheet" href="../assets/style.css"></head><body>
+<div class="shell"><aside class="side"><div class="brand"><small>MMA3001 · 2026</small>Building Occupancy<br>Source Documentation</div>
+<div class="side-links"><a href="../index.html" class="">Overview &amp; workflow</a><div class="subhead">Main source modules</div><a class="" href="../modules/src_01_Extract_Occupancy_Data.html">01_Extract_Occupancy_Data.py</a><a class="" href="../modules/src_02_Inspect_Occupancy_Data.html">02_Inspect_Occupancy_Data.py</a><a class="" href="../modules/src_03_preprocess_training.html">03_preprocess_training.py</a><a class="" href="../modules/src_03b_preprocess_G20.html">03b_preprocess_G20.py</a><a class="" href="../modules/src_04_feature_engineering.html">04_feature_engineering.py</a><a class="active" href="../modules/src_04b_feature_engineering_G20.html">04b_feature_engineering_G20.py</a><a class="" href="../modules/src_05_train_models.html">05_train_models.py</a><a class="" href="../modules/src_06b_validate_G20_minute.html">06b_validate_G20_minute.py</a><a class="" href="../modules/src_07_generate_report_figures.html">07_generate_report_figures.py</a><div class="subhead">Earlier implementations</div><a href="../modules/src_03_Preprocess_hourly.html" class="">03_Preprocess_hourly.py</a><a href="../modules/src_06_validate_G20.html" class="">06_validate_G20.py</a><div class="subhead">Other resources</div><a href="https://github.com/jsau0014-gif/MMA3001-Building-occupancy-prediction-regression-methods/tree/main/tests">Pytest source ↗</a><a href="https://github.com/jsau0014-gif/MMA3001-Building-occupancy-prediction-regression-methods/blob/main/docs/TEST_REPORT.md">Test report ↗</a><a href="https://github.com/jsau0014-gif/MMA3001-Building-occupancy-prediction-regression-methods/blob/main/README.md">README &amp; setup ↗</a></div></aside><main class="main">
+    <div class="breadcrumb"><a href="../index.html">Overview</a> / src/04b_feature_engineering_G20.py</div>
+    <div class="eyebrow">Source module · Feature engineering</div>
+    <h1>04b · Engineer G.20 validation inputs</h1>
+    <p class="lead">Applies the same seven temporal features to the minute-averaged G.20 observations for independent room evaluation.</p>
+    <div><span class="tag ">Feature engineering</span> <span class="small muted">120 lines indexed locally</span> ·
+    <a target="_blank" rel="noopener" href="https://github.com/jsau0014-gif/MMA3001-Building-occupancy-prediction-regression-methods/blob/main/src/04b_feature_engineering_G20.py">View current source on GitHub ↗</a></div>
+    <div class="cards">
+    <section class="card"><h3>Required inputs</h3><ul class="path-list"><li><code>Data/processed/G20_Minute_validation.csv</code></li></ul></section>
+    <section class="card"><h3>Files and results produced</h3><ul class="path-list"><li><code>Data/processed/G20_Model_Validation_Minute.csv</code></li></ul></section>
+    </div><h2>Function reference</h2><p class="muted small">Signatures and line numbers are extracted from the local production source without executing it.</p><div class="card"><section class="function"><h3>def create_features(data):</h3><span class="small muted">Defined at source line 33</span><p>Append seven timestamp-derived features to a DataFrame, preserving the target and timestamp for later filtering.</p><p><strong>Input:</strong> data: pandas.DataFrame containing a parseable Timestamp column</p><p><strong>Output:</strong> pandas.DataFrame with TimeSin, TimeCos, DaySin, DayCos, MonthSin, MonthCos and IsWeekend.</p></section></div><h2>Source listing</h2><p class="muted small">The source below is a static copy from the local working tree at the time documentation was built; refresh after code changes.</p><details><summary>Expand full source code (HTML escaped)</summary><pre><code>&quot;&quot;&quot;
+Creating a time-based feature/variable to enable occupancy regression.
+
+Using the one-minute weighted averages from g25 for training.
+using untouched g20 original headcount measurements for evaluation
+
+No resampling or occupancy modification is performed.
+&quot;&quot;&quot;
+
+import pandas as pd
+import numpy as np
+from pathlib import Path
+
+#Setting up file locations
+
+project_dir = Path(__file__).resolve().parent.parent
+data_dir = project_dir / &quot;Data&quot; / &quot;processed&quot;
+
+validation_file = data_dir / &quot;G20_Minute_validation.csv&quot;
+
+validation_output = data_dir / &quot;G20_Model_Validation_Minute.csv&quot;
+
+#pulling g20 training data from csv files
+validation = pd.read_csv(validation_file)
+
+validation[&quot;Timestamp&quot;] = pd.to_datetime(
+    validation[&quot;Timestamp&quot;],
+    utc=True,
+    errors = &quot;coerce&quot;
+).dt.tz_convert(&quot;Australia/Melbourne&quot;)
+
+#constructing feature engineering function
+def create_features(data):
+
+    data= data.copy()
+
+    #converting to a fractional hour, including mins and sec
+    time_of_day = (
+        data[&quot;Timestamp&quot;].dt.hour
+        + data[&quot;Timestamp&quot;].dt.minute / 60
+        + data[&quot;Timestamp&quot;].dt.second / 3600
+    )
+
+    # Daily cyclical features
+    data[&quot;TimeSin&quot;] = np.sin(
+        2 * np.pi * time_of_day / 24
+    )
+
+    data[&quot;TimeCos&quot;] = np.cos(
+        2 * np.pi * time_of_day / 24
+    )
+
+    # Day of week: Monday = 0 Sunday = 6
+    day = data[&quot;Timestamp&quot;].dt.dayofweek
+
+    #weekly cyclical features
+    data[&quot;DaySin&quot;] = np.sin(
+        2 * np.pi * day / 7
+    )
+
+    data[&quot;DayCos&quot;] = np.cos(
+        2 * np.pi * day / 7
+    )
+
+    #Month: January = 1 December = 12
+    month = data[&quot;Timestamp&quot;].dt.month
+
+    data[&quot;MonthSin&quot;] = np.sin(
+        2 * np.pi * (month-1) / 12
+    )
+
+    data[&quot;MonthCos&quot;] = np.cos(
+        2 * np.pi * (month-1) / 12
+    )
+
+    #Weekend indicator
+    data[&quot;IsWeekend&quot;] = (day &gt;= 5).astype(int)
+
+    return data
+#applying transformation to validation
+validation = create_features(validation)
+
+#selecting identical model input columns
+features = [
+    &quot;TimeSin&quot;,
+    &quot;TimeCos&quot;,
+    &quot;DaySin&quot;,
+    &quot;DayCos&quot;,
+    &quot;MonthSin&quot;,
+    &quot;MonthCos&quot;,
+    &quot;IsWeekend&quot;
+]
+
+#retaining timestampt and target for comparison and debugging
+output_columns = [
+    &quot;Timestamp&quot;,
+    &quot;Headcount&quot;
+] + features
+
+validation = validation[output_columns].copy()
+
+#removing rows with invalid timestamps or targets
+validation = validation.dropna(subset=output_columns)
+
+#saving data files
+validation.to_csv(validation_output, index=False)
+
+print(&quot;\nFeature engineering complete!&quot;)
+
+print(&quot;G20 validation observations:&quot;, len(validation))
+
+print(&quot;\nFeature columns:&quot;)
+print(features)
+
+
+print(&quot;\nG20 sample:&quot;)
+print(validation.head(5).to_string(index=False))
+
+print(&quot;Saved validation file:&quot;, validation_output)
+print(&quot;\nOriginal occupancy files unchanged.&quot;)</code></pre></details>
+<footer>Generated by <code>tools/build_html_docs.py</code>. Source links refer to the GitHub <code>main</code> branch. Code is documented by parsing Python source; modules are not imported or executed.</footer></main></div>
+</body></html>

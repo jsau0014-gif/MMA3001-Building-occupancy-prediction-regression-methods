@@ -1,0 +1,171 @@
+<!doctype html>
+<html lang="en"><head><meta charset="utf-8"><meta name="viewport" content="width=device-width,initial-scale=1">
+<title>Legacy · Hourly preprocessing | MMA3001 Source Documentation</title>
+<meta name="description" content="Numerical methods and machine learning source documentation for Building Occupancy Prediction at Monash University.">
+<link rel="stylesheet" href="../assets/style.css"></head><body>
+<div class="shell"><aside class="side"><div class="brand"><small>MMA3001 · 2026</small>Building Occupancy<br>Source Documentation</div>
+<div class="side-links"><a href="../index.html" class="">Overview &amp; workflow</a><div class="subhead">Main source modules</div><a class="" href="../modules/src_01_Extract_Occupancy_Data.html">01_Extract_Occupancy_Data.py</a><a class="" href="../modules/src_02_Inspect_Occupancy_Data.html">02_Inspect_Occupancy_Data.py</a><a class="" href="../modules/src_03_preprocess_training.html">03_preprocess_training.py</a><a class="" href="../modules/src_03b_preprocess_G20.html">03b_preprocess_G20.py</a><a class="" href="../modules/src_04_feature_engineering.html">04_feature_engineering.py</a><a class="" href="../modules/src_04b_feature_engineering_G20.html">04b_feature_engineering_G20.py</a><a class="" href="../modules/src_05_train_models.html">05_train_models.py</a><a class="" href="../modules/src_06b_validate_G20_minute.html">06b_validate_G20_minute.py</a><a class="" href="../modules/src_07_generate_report_figures.html">07_generate_report_figures.py</a><div class="subhead">Earlier implementations</div><a href="../modules/src_03_Preprocess_hourly.html" class="active">03_Preprocess_hourly.py</a><a href="../modules/src_06_validate_G20.html" class="">06_validate_G20.py</a><div class="subhead">Other resources</div><a href="https://github.com/jsau0014-gif/MMA3001-Building-occupancy-prediction-regression-methods/tree/main/tests">Pytest source ↗</a><a href="https://github.com/jsau0014-gif/MMA3001-Building-occupancy-prediction-regression-methods/blob/main/docs/TEST_REPORT.md">Test report ↗</a><a href="https://github.com/jsau0014-gif/MMA3001-Building-occupancy-prediction-regression-methods/blob/main/README.md">README &amp; setup ↗</a></div></aside><main class="main">
+    <div class="breadcrumb"><a href="../index.html">Overview</a> / src/03_Preprocess_hourly.py</div>
+    <div class="eyebrow">Source module · Legacy / not used by final workflow</div>
+    <h1>Legacy · Hourly preprocessing</h1>
+    <p class="lead">Earlier hourly-resolution experiment. It remains in src/ for traceability but is not used to reproduce the final one-minute-averaged experiment.</p>
+    <div><span class="tag badge-legacy">Legacy workflow</span> <span class="small muted">152 lines indexed locally</span> ·
+    <a target="_blank" rel="noopener" href="https://github.com/jsau0014-gif/MMA3001-Building-occupancy-prediction-regression-methods/blob/main/src/03_Preprocess_hourly.py">View current source on GitHub ↗</a></div>
+    <div class="cards">
+    <section class="card"><h3>Required inputs</h3><ul class="path-list"><li><code>Data/processed/G25_Occupancy.csv</code></li><li><code>Data/processed/G20_Occupancy.csv</code></li></ul></section>
+    <section class="card"><h3>Files and results produced</h3><ul class="path-list"><li><code>Data/processed/G25_Hourly.csv</code></li><li><code>Data/processed/G20_Hourly.csv</code></li></ul></section>
+    </div><h2>Function reference</h2><p>This module implements its principal operations at top level. Executing the script triggers its workflow; it is not a callable API module. See the input/output contract above and the GitHub source.</p><h2>Source listing</h2><p class="muted small">The source below is a static copy from the local working tree at the time documentation was built; refresh after code changes.</p><details><summary>Expand full source code (HTML escaped)</summary><pre><code>&quot;&quot;&quot;
+This script extracts the occupancy count at the end of each hour to 
+standardise an hourly resolution accross both rooms which currenty are 
+recorded at irregular inteverals.
+This allows for unbiased modelling
+&quot;&quot;&quot;
+
+import pandas as pd
+from pathlib import Path
+import matplotlib.pyplot as plt
+
+project_Dir = Path(__file__).resolve().parent.parent
+
+input_dir = project_Dir / &quot;Data&quot; / &quot;processed&quot;
+
+rooms = [&quot;G20&quot;,&quot;G25&quot;]
+
+for room in rooms:
+
+    #extracting date and headcount data
+    file = input_dir / f&quot;{room}_Occupancy.csv&quot;
+    data = pd.read_csv(
+        file,
+        usecols=[&quot;collecteddate&quot;,&quot;headcount&quot;]
+    )
+
+    #converting timestampls
+    data[&quot;Timestamp&quot;] = pd.to_datetime(
+        data[&quot;collecteddate&quot;],
+        utc=True,
+        errors=&quot;coerce&quot;
+    ).dt.tz_convert(&quot;Australia/Melbourne&quot;)
+
+# Ensure headcount is numeric
+    data[&quot;headcount&quot;] = pd.to_numeric(
+        data[&quot;headcount&quot;],
+        errors=&quot;coerce&quot;
+    )
+
+# Remove invalid measurements
+    data = data.dropna(
+        subset=[&quot;Timestamp&quot;, &quot;headcount&quot;]
+    )
+    #sorting chronologically
+    data=data.sort_values(&quot;Timestamp&quot;,kind=&quot;stable&quot;)
+
+    #converting into one minute occupancy measurments (minute resolution)
+    occupancy = data.set_index(&quot;Timestamp&quot;)[&quot;headcount&quot;]
+
+    #take the latest measurement within each minute
+    minute_data = occupancy.resample(&quot;1min&quot;).last()
+
+    minute_data = minute_data.ffill()
+
+    hourly = minute_data.resample(&quot;1h&quot;).mean()
+
+    #count actual measurements in each hour
+    hourly_counts = occupancy.resample(&quot;1h&quot;).count()
+
+    #count minutes with esitmate occupancy values
+    coverage = minute_data.resample(&quot;1h&quot;).count()
+
+    #combine into one dataframe
+    hourly = pd.DataFrame({
+        &quot;Headcount&quot;: hourly,
+        &quot;MeasurementCount&quot;: hourly_counts,
+        &quot;CoverageMinutes&quot;: coverage
+    })
+
+    #keep hours with atleast one measurement
+    hourly = hourly[
+        hourly[&quot;MeasurementCount&quot;] &gt;0 
+    ].copy()
+
+    #Calculate approximate percentage of hour covvered using weighted averages
+    hourly[&quot;CoveragePct&quot;] = (
+        hourly[&quot;CoverageMinutes&quot;] / 60*100
+    )
+
+    #Restore timestamp as a column
+    hourly = hourly.reset_index()
+
+    #Extracting time-based features
+    hourly[&quot;Hour&quot;] = hourly[&quot;Timestamp&quot;].dt.hour
+
+    hourly[&quot;DayOfWeek&quot;] = (
+        hourly[&quot;Timestamp&quot;].dt.dayofweek
+    )
+
+    hourly[&quot;Month&quot;] = hourly[&quot;Timestamp&quot;].dt.month
+
+    hourly[&quot;IsWeekend&quot;] = (
+        hourly[&quot;DayOfWeek&quot;] &gt;=5
+    ).astype(int)
+
+
+    
+    #saving output data
+    output_file = input_dir / f&quot;{room}_Hourly.csv&quot;
+
+    hourly.to_csv(output_file, index=False)
+
+    print(f&quot;\n========== {room} ==========&quot;)
+
+    print(&quot;Raw measurements:&quot;, len(data))
+
+    print(&quot;Total hours in date range:&quot;, len(hourly_counts))
+
+    print(&quot;Hours containing measurements:&quot;, len(hourly))
+
+    print(&quot;\nHourly headcount statistics:&quot;)
+    print(hourly[&quot;Headcount&quot;].describe())
+
+    print(&quot;\nHourly measurement coverage:&quot;)
+    print(hourly[&quot;CoveragePct&quot;].describe())
+
+    print(&quot;\nFirst 10 hourly measurements:&quot;)
+    print(hourly.head(10).to_string(index=False))
+
+    # --------------------------------------------------
+    # Plot first week of occupancy
+    # --------------------------------------------------
+
+    start = hourly[&quot;Timestamp&quot;].min()
+    end = start + pd.Timedelta(days=7)
+
+    sample = hourly[
+        (hourly[&quot;Timestamp&quot;] &gt;= start) &amp;
+        (hourly[&quot;Timestamp&quot;] &lt; end)
+    ]
+
+    plt.figure(figsize=(12, 5))
+
+    plt.plot(
+        sample[&quot;Timestamp&quot;],
+        sample[&quot;Headcount&quot;],
+        marker=&quot;.&quot;,
+        markersize=3,
+        linewidth=1
+    )
+
+    plt.title(
+        f&quot;{room} - Hourly Average Headcount&quot;
+    )
+
+    plt.xlabel(&quot;Time&quot;)
+    plt.ylabel(&quot;Average Headcount&quot;)
+    plt.grid(True)
+    plt.tight_layout()
+
+plt.show()
+
+</code></pre></details>
+<footer>Generated by <code>tools/build_html_docs.py</code>. Source links refer to the GitHub <code>main</code> branch. Code is documented by parsing Python source; modules are not imported or executed.</footer></main></div>
+</body></html>

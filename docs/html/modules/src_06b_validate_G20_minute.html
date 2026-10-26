@@ -1,0 +1,445 @@
+<!doctype html>
+<html lang="en"><head><meta charset="utf-8"><meta name="viewport" content="width=device-width,initial-scale=1">
+<title>06b · Independent G.20 validation | MMA3001 Source Documentation</title>
+<meta name="description" content="Numerical methods and machine learning source documentation for Building Occupancy Prediction at Monash University.">
+<link rel="stylesheet" href="../assets/style.css"></head><body>
+<div class="shell"><aside class="side"><div class="brand"><small>MMA3001 · 2026</small>Building Occupancy<br>Source Documentation</div>
+<div class="side-links"><a href="../index.html" class="">Overview &amp; workflow</a><div class="subhead">Main source modules</div><a class="" href="../modules/src_01_Extract_Occupancy_Data.html">01_Extract_Occupancy_Data.py</a><a class="" href="../modules/src_02_Inspect_Occupancy_Data.html">02_Inspect_Occupancy_Data.py</a><a class="" href="../modules/src_03_preprocess_training.html">03_preprocess_training.py</a><a class="" href="../modules/src_03b_preprocess_G20.html">03b_preprocess_G20.py</a><a class="" href="../modules/src_04_feature_engineering.html">04_feature_engineering.py</a><a class="" href="../modules/src_04b_feature_engineering_G20.html">04b_feature_engineering_G20.py</a><a class="" href="../modules/src_05_train_models.html">05_train_models.py</a><a class="active" href="../modules/src_06b_validate_G20_minute.html">06b_validate_G20_minute.py</a><a class="" href="../modules/src_07_generate_report_figures.html">07_generate_report_figures.py</a><div class="subhead">Earlier implementations</div><a href="../modules/src_03_Preprocess_hourly.html" class="">03_Preprocess_hourly.py</a><a href="../modules/src_06_validate_G20.html" class="">06_validate_G20.py</a><div class="subhead">Other resources</div><a href="https://github.com/jsau0014-gif/MMA3001-Building-occupancy-prediction-regression-methods/tree/main/tests">Pytest source ↗</a><a href="https://github.com/jsau0014-gif/MMA3001-Building-occupancy-prediction-regression-methods/blob/main/docs/TEST_REPORT.md">Test report ↗</a><a href="https://github.com/jsau0014-gif/MMA3001-Building-occupancy-prediction-regression-methods/blob/main/README.md">README &amp; setup ↗</a></div></aside><main class="main">
+    <div class="breadcrumb"><a href="../index.html">Overview</a> / src/06b_validate_G20_minute.py</div>
+    <div class="eyebrow">Source module · Model evaluation</div>
+    <h1>06b · Independent G.20 validation</h1>
+    <p class="lead">Loads fitted G.25 models without retraining. Evaluates the processed G.20 observations and reports MAE, RMSE, R², mean signed residual (actual − predicted), runtime and diagnostic plots.</p>
+    <div><span class="tag ">Model evaluation</span> <span class="small muted">426 lines indexed locally</span> ·
+    <a target="_blank" rel="noopener" href="https://github.com/jsau0014-gif/MMA3001-Building-occupancy-prediction-regression-methods/blob/main/src/06b_validate_G20_minute.py">View current source on GitHub ↗</a></div>
+    <div class="cards">
+    <section class="card"><h3>Required inputs</h3><ul class="path-list"><li><code>Data/processed/G20_Model_Validation_Minute.csv</code></li><li><code>Results/05_linear_model.joblib</code></li><li><code>Results/05_decision_tree.joblib</code></li><li><code>Results/05_svr_model.joblib (current lookup)</code></li></ul></section>
+    <section class="card"><h3>Files and results produced</h3><ul class="path-list"><li><code>Results/06b_G20model_comparison.csv</code></li><li><code>Results/06b_G20validation_predictions.csv</code></li><li><code>Results/06b_G20*.png plots</code></li></ul></section>
+    </div><div class="warn"><strong>Usage notes and limitations</strong><ul><li>Important checkpoint mismatch: this script looks for 05_svr_model.joblib, while script 05 writes 05_svr_model_full.joblib. Align and re-evaluate before making a cross-room full-model claim.</li><li>G20_SAMPLE_SIZE acts as a cap; a cap greater than available observations means all rows are evaluated.</li></ul></div><h2>Function reference</h2><p>This module implements its principal operations at top level. Executing the script triggers its workflow; it is not a callable API module. See the input/output contract above and the GitHub source.</p><h2>Source listing</h2><p class="muted small">The source below is a static copy from the local working tree at the time documentation was built; refresh after code changes.</p><details><summary>Expand full source code (HTML escaped)</summary><pre><code>&quot;&quot;&quot;This script cross validates the models trained on the g25 data
+on the g20 data and records residuals
+&quot;&quot;&quot;
+
+from pathlib import Path
+import time
+
+import joblib
+import matplotlib.pyplot as plt
+import numpy as np
+import pandas as pd
+
+from sklearn.metrics import (
+    mean_absolute_error,
+    mean_squared_error,
+    r2_score
+)
+
+#setting up file paths
+
+project_dir = Path(__file__).resolve().parent.parent
+
+data_dir = project_dir / &quot;Data&quot; / &quot;processed&quot;
+results_dir = project_dir / &quot;Results&quot;
+
+results_dir.mkdir(parents=True,exist_ok=True)
+
+features = [
+    &quot;TimeSin&quot;,
+    &quot;TimeCos&quot;,
+    &quot;DaySin&quot;,
+    &quot;DayCos&quot;,
+    &quot;MonthSin&quot;,
+    &quot;MonthCos&quot;,
+    &quot;IsWeekend&quot;
+]
+
+#G20 observations for faster SVR prediction
+G20_SAMPLE_SIZE = 1000000
+
+RANDOM_STATE = 42
+PLOT_DAYS = 7
+
+#loading fitted g25 models
+
+model_paths = {
+    &quot;Linear Regression&quot;: results_dir / &quot;05_linear_model.joblib&quot;,
+    &quot;Decision Tree&quot;: results_dir / &quot;05_decision_tree.joblib&quot;,
+    &quot;SVR&quot;: results_dir / &quot;05_svr_model.joblib&quot;
+}
+
+# Check that model files exist
+for model_name, path in model_paths.items():
+
+    if not path.exists():
+        raise FileNotFoundError(
+            f&quot;Missing {path.name}. Save the fitted &quot;
+            f&quot;{model_name} model from script 05 first.&quot;
+        )
+#load g20 val data
+models = {
+    name: joblib.load(path)
+    for name, path in model_paths.items()
+}
+
+g20 = pd.read_csv(
+    data_dir / &quot;G20_Model_Validation_Minute.csv&quot;
+)
+
+required_columns = [
+    &quot;Timestamp&quot;,
+    &quot;Headcount&quot;,
+    *features
+]
+
+missing_columns = [
+    col for col in required_columns
+    if col not in g20.columns
+]
+
+if missing_columns:
+    raise ValueError(
+        f&quot;Missing G20 columns: {missing_columns}&quot;
+    )
+
+#removing incomplete observations
+g20 = g20.dropna(
+    subset=required_columns
+).copy()
+
+#convert timestamps to melb local time
+g20[&quot;Timestamp&quot;] = pd.to_datetime(
+    g20[&quot;Timestamp&quot;],
+    utc=True
+).dt.tz_convert(&quot;Australia/Melbourne&quot;)
+
+#selecting the validation sample
+
+sample_size = min(
+    G20_SAMPLE_SIZE,
+    len(g20)
+)
+
+g20_sample = (
+    g20.sample(
+        n=sample_size,
+        random_state=RANDOM_STATE
+    )
+    .sort_values(&quot;Timestamp&quot;)
+    .reset_index(drop=True)
+)
+
+#inputs and actual heacounts
+X_g20 = g20_sample[features]
+
+y_g20 = g20_sample[&quot;Headcount&quot;].to_numpy()
+
+print(&quot;\nMinute-weighted G20 observations:&quot;, len(g20))
+print(&quot;G20 evaluation observations:&quot;, sample_size)
+
+print(&quot;\nG20 date range:&quot;)
+print(g20_sample[&quot;Timestamp&quot;].min())
+print(g20_sample[&quot;Timestamp&quot;].max())
+
+print(&quot;\nG20 mean headcount:&quot;, y_g20.mean())
+print(&quot;G20 standard deviation:&quot;, y_g20.std())
+print(&quot;G20 maximum headcount:&quot;, y_g20.max())
+
+#precit g20 using g25 trained models
+comparison_rows = []
+
+validation_results = g20_sample[
+    [&quot;Timestamp&quot;, &quot;Headcount&quot;]
+].rename(
+    columns={&quot;Headcount&quot;: &quot;Actual&quot;}
+).copy()
+
+prediction_columns = {
+    &quot;Linear Regression&quot;: &quot;LinearPredicted&quot;,
+    &quot;Decision Tree&quot;: &quot;TreePredicted&quot;,
+    &quot;SVR&quot;: &quot;SVRPredicted&quot;
+}
+
+for model_name, model in models.items():
+    print(
+        f&quot;\nPredicting G20 using {model_name}...&quot;
+    )
+
+    #Check feature compatibility
+    trained_features = getattr(
+        model,
+        &quot;feature_names_in_&quot;,
+        None
+    )
+
+    if trained_features is not None:
+        if list(trained_features) != features:
+            raise ValueError(
+                f&quot;Feature mismatch for {model_name}&quot;
+            )
+
+    #General Predictions
+    start_time = time.perf_counter()
+
+    y_prediction = model.predict(X_g20)
+
+    prediction_time = (
+        time.perf_counter() - start_time
+    )
+
+    #store predictions and residuals
+    column = prediction_columns[model_name]
+    validation_results[column] = y_prediction
+    residual_column = column.replace(
+        &quot;Predicted&quot;,
+        &quot;Residual&quot;
+    )
+
+    validation_results[residual_column] = (
+        y_g20 - y_prediction
+    )
+
+    #Calculate performance
+    mae = mean_absolute_error(
+        y_g20,
+        y_prediction
+    )
+
+    rmse = np.sqrt(
+        mean_squared_error(
+            y_g20,
+            y_prediction
+        )
+    )
+
+    r2 = r2_score(
+        y_g20,
+        y_prediction
+    )
+
+    mean_residual = np.mean(
+        y_g20 - y_prediction
+    )
+
+    comparison_rows.append({
+        &quot;Model&quot;: model_name,
+        &quot;Observations&quot;: len(y_g20),
+        &quot;MAE&quot;: mae,
+        &quot;RMSE&quot;: rmse,
+        &quot;R2&quot;: r2,
+        &quot;MeanResidual&quot;: mean_residual,
+        &quot;PredictionSeconds&quot;: prediction_time
+    })
+
+    print(f&quot;MAE: {mae:.4f}&quot;)
+    print(f&quot;RMSE: {rmse:.4f}&quot;)
+    print(f&quot;R2: {r2:.4f}&quot;)
+
+    print(
+        f&quot;Mean residual: {mean_residual:.4f}&quot;
+    )
+
+    print(
+        f&quot;Prediction time: {prediction_time:.2f}s&quot;
+    )
+
+#Compare G20 model performance
+
+comparison = pd.DataFrame(
+    comparison_rows
+)
+
+print(&quot;\nG20 CROSS-ROOM VALIDATION&quot;)
+print(comparison.to_string(index=False))
+
+comparison.to_csv(
+    results_dir / &quot;06b_G20model_comparison.csv&quot;,
+    index=False
+)
+
+
+#saving G20 predictions and residuals
+
+validation_results.to_csv(
+    results_dir / &quot;06b_G20validation_predictions.csv&quot;,
+    index=False
+)
+
+#plot actual vs predicted and residuals
+for model_name, column in prediction_columns.items():
+
+    safe_name = model_name.lower().replace(
+        &quot; &quot;,
+        &quot;_&quot;
+    )
+
+    actual = validation_results[&quot;Actual&quot;]
+    predicted = validation_results[column]
+
+    residual = actual - predicted
+
+    #Actual vs predicted
+
+    fig, ax = plt.subplots(figsize=(8,6))
+
+    plot = ax.hexbin(
+        actual,
+        predicted,
+        gridsize=55,
+        bins=&quot;log&quot;,
+        mincnt=1,
+        cmap=&quot;viridis&quot;
+    )
+
+    fig.colorbar(
+        plot,
+        ax=ax,
+        label=&quot;Log observation count&quot;
+    )
+
+    # Perfect prediction line
+    lower = min(
+        float(actual.min()),
+        float(predicted.min()),
+        0
+    )
+
+    upper = max(
+        float(actual.max()),
+        float(predicted.max())
+    )
+
+    ax.plot(
+        [lower, upper],
+        [lower, upper],
+        &quot;r--&quot;,
+        label=&quot;Perfect prediction&quot;
+    )
+
+    ax.set_xlabel(&quot;Actual G20 headcount&quot;)
+    ax.set_ylabel(&quot;Predicted G20 headcount&quot;)
+
+    ax.set_title(
+        f&quot;G20: {model_name} - Actual vs Predicted&quot;
+    )
+
+    ax.legend()
+    ax.grid(True, alpha=0.2)
+
+    fig.tight_layout()
+
+    fig.savefig(
+        results_dir /
+        f&quot;06b_G20{safe_name}_actual_vs_predicted.png&quot;,
+        dpi=200
+    )
+
+    plt.close(fig)
+
+    # ---------------------------------------------
+    # Residual plot
+    # ---------------------------------------------
+
+    fig, ax = plt.subplots(figsize=(8, 5))
+
+    ax.scatter(
+        predicted,
+        residual,
+        s=3,
+        alpha=0.15
+    )
+
+    ax.axhline(
+        0,
+        color=&quot;red&quot;,
+        linestyle=&quot;--&quot;
+    )
+
+    ax.set_xlabel(&quot;Predicted G20 headcount&quot;)
+
+    ax.set_ylabel(
+        &quot;Residual (Actual - Predicted)&quot;
+    )
+
+    ax.set_title(
+        f&quot;G20: {model_name} Residuals&quot;
+    )
+
+    ax.grid(True, alpha=0.2)
+
+    fig.tight_layout()
+
+    fig.savefig(
+        results_dir /
+        f&quot;06b_G20{safe_name}_residuals.png&quot;,
+        dpi=200
+    )
+
+    plt.close(fig)
+
+#G2O occupancy predictions over time
+
+# Select first seven days of sampled observations
+start = validation_results[&quot;Timestamp&quot;].min()
+
+end = start + pd.Timedelta(
+    days=PLOT_DAYS
+)
+
+sample = validation_results[
+    (validation_results[&quot;Timestamp&quot;] &gt;= start)
+    &amp; (validation_results[&quot;Timestamp&quot;] &lt; end)
+].sort_values(&quot;Timestamp&quot;)
+
+fig, ax = plt.subplots(figsize=(13, 5))
+
+# Actual occupancy
+ax.scatter(
+    sample[&quot;Timestamp&quot;],
+    sample[&quot;Actual&quot;],
+    s=12,
+    alpha=0.65,
+    label=&quot;Actual G20&quot;
+)
+
+# Model predictions
+for model_name, column in prediction_columns.items():
+
+    ax.scatter(
+        sample[&quot;Timestamp&quot;],
+        sample[column],
+        s=8,
+        alpha=0.6,
+        label=model_name
+    )
+
+ax.set_xlabel(&quot;Time (Melbourne)&quot;)
+ax.set_ylabel(&quot;Headcount&quot;)
+
+ax.set_title(
+    &quot;G20: Actual vs Predicted Occupancy - 7 Days&quot;
+)
+
+ax.legend()
+ax.grid(True, alpha=0.2)
+
+fig.autofmt_xdate()
+fig.tight_layout()
+
+fig.savefig(
+    results_dir / &quot;06b_G20occupancy_over_time.png&quot;,
+    dpi=200
+)
+
+plt.close(fig)
+
+
+# --------------------------------------------------
+# Complete
+# --------------------------------------------------
+
+print(
+    &quot;\nG20 results saved to:&quot;,
+    results_dir
+)
+
+</code></pre></details>
+<footer>Generated by <code>tools/build_html_docs.py</code>. Source links refer to the GitHub <code>main</code> branch. Code is documented by parsing Python source; modules are not imported or executed.</footer></main></div>
+</body></html>

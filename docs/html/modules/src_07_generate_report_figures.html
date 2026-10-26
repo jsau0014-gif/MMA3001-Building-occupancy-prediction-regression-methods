@@ -1,0 +1,834 @@
+<!doctype html>
+<html lang="en"><head><meta charset="utf-8"><meta name="viewport" content="width=device-width,initial-scale=1">
+<title>07 · Generate report figures | MMA3001 Source Documentation</title>
+<meta name="description" content="Numerical methods and machine learning source documentation for Building Occupancy Prediction at Monash University.">
+<link rel="stylesheet" href="../assets/style.css"></head><body>
+<div class="shell"><aside class="side"><div class="brand"><small>MMA3001 · 2026</small>Building Occupancy<br>Source Documentation</div>
+<div class="side-links"><a href="../index.html" class="">Overview &amp; workflow</a><div class="subhead">Main source modules</div><a class="" href="../modules/src_01_Extract_Occupancy_Data.html">01_Extract_Occupancy_Data.py</a><a class="" href="../modules/src_02_Inspect_Occupancy_Data.html">02_Inspect_Occupancy_Data.py</a><a class="" href="../modules/src_03_preprocess_training.html">03_preprocess_training.py</a><a class="" href="../modules/src_03b_preprocess_G20.html">03b_preprocess_G20.py</a><a class="" href="../modules/src_04_feature_engineering.html">04_feature_engineering.py</a><a class="" href="../modules/src_04b_feature_engineering_G20.html">04b_feature_engineering_G20.py</a><a class="" href="../modules/src_05_train_models.html">05_train_models.py</a><a class="" href="../modules/src_06b_validate_G20_minute.html">06b_validate_G20_minute.py</a><a class="active" href="../modules/src_07_generate_report_figures.html">07_generate_report_figures.py</a><div class="subhead">Earlier implementations</div><a href="../modules/src_03_Preprocess_hourly.html" class="">03_Preprocess_hourly.py</a><a href="../modules/src_06_validate_G20.html" class="">06_validate_G20.py</a><div class="subhead">Other resources</div><a href="https://github.com/jsau0014-gif/MMA3001-Building-occupancy-prediction-regression-methods/tree/main/tests">Pytest source ↗</a><a href="https://github.com/jsau0014-gif/MMA3001-Building-occupancy-prediction-regression-methods/blob/main/docs/TEST_REPORT.md">Test report ↗</a><a href="https://github.com/jsau0014-gif/MMA3001-Building-occupancy-prediction-regression-methods/blob/main/README.md">README &amp; setup ↗</a></div></aside><main class="main">
+    <div class="breadcrumb"><a href="../index.html">Overview</a> / src/07_generate_report_figures.py</div>
+    <div class="eyebrow">Source module · Reporting</div>
+    <h1>07 · Generate report figures</h1>
+    <p class="lead">Produces final comparison, error, occupancy-distribution and computational-cost figures from previously saved metrics. Does not fit models or generate new predictions.</p>
+    <div><span class="tag ">Reporting</span> <span class="small muted">815 lines indexed locally</span> ·
+    <a target="_blank" rel="noopener" href="https://github.com/jsau0014-gif/MMA3001-Building-occupancy-prediction-regression-methods/blob/main/src/07_generate_report_figures.py">View current source on GitHub ↗</a></div>
+    <div class="cards">
+    <section class="card"><h3>Required inputs</h3><ul class="path-list"><li><code>Results/05_model_comparison_random.csv</code></li><li><code>Results/06b_G20model_comparison.csv or Results/06b_G20_model_comparison.csv</code></li><li><code>Results/06b_G20validation_predictions.csv or Results/06b_G20_validation_predictions.csv</code></li><li><code>Additional optional result CSVs</code></li></ul></section>
+    <section class="card"><h3>Files and results produced</h3><ul class="path-list"><li><code>Results/report_figures/*.png</code></li></ul></section>
+    </div><div class="warn"><strong>Usage notes and limitations</strong><ul><li>Optional figures may be skipped when earlier experimental comparison CSVs are absent.</li></ul></div><h2>Function reference</h2><p class="muted small">Signatures and line numbers are extracted from the local production source without executing it.</p><div class="card"><section class="function"><h3>def find_file(*filenames):</h3><span class="small muted">Defined at source line 45</span><p>Return the first existing filename within Results/ from several supported legacy naming variants.</p><p><strong>Input:</strong> *filenames: candidate filenames in priority order</p><p><strong>Output:</strong> pathlib.Path of the first existing file; raises FileNotFoundError when none exists.</p><details><summary>Original Python docstring</summary><pre><code>Return first existing result file.</code></pre></details></section><section class="function"><h3>def save_figure(filename):</h3><span class="small muted">Defined at source line 59</span><p>Save the current Matplotlib figure to Results/report_figures, with a fallback to Results/.</p><p><strong>Input:</strong> filename: output PNG filename</p><p><strong>Output:</strong> No value returned; current figure is closed.</p><details><summary>Original Python docstring</summary><pre><code>Save current figure and close it.</code></pre></details></section><section class="function"><h3>def get_g25_row(prefix):</h3><span class="small muted">Defined at source line 149</span><p>Select the appropriate G.25 comparison-metrics row by its model-name prefix.</p><p><strong>Input:</strong> prefix: model label prefix for the metrics DataFrame index</p><p><strong>Output:</strong> Selected row of internal-validation metrics.</p></section></div><h2>Source listing</h2><p class="muted small">The source below is a static copy from the local working tree at the time documentation was built; refresh after code changes.</p><details><summary>Expand full source code (HTML escaped)</summary><pre><code>
+&quot;&quot;&quot;
+MMA3001 - Generate Report Figures
+
+Creates plots comparing:
+- G25 internal validation and G20 external validation
+- Linear Regression, Decision Tree and SVR
+- Prediction errors and occupancy patterns
+- Computational performance and optimisation
+
+No model training or prediction is performed.
+&quot;&quot;&quot;
+
+from pathlib import Path
+
+import numpy as np
+import pandas as pd
+import matplotlib.pyplot as plt
+
+
+# ============================================================
+# 1. FILE LOCATIONS
+# ============================================================
+
+project_dir = Path(__file__).resolve().parent.parent
+data_dir = project_dir / &quot;Data&quot; / &quot;processed&quot;
+results_dir = project_dir / &quot;Results&quot;
+
+figures_dir = results_dir / &quot;report_figures&quot;
+figures_dir.mkdir(parents=True, exist_ok=True)
+
+plt.rcParams.update({
+    &quot;font.size&quot;: 11,
+    &quot;axes.titlesize&quot;: 13,
+    &quot;axes.labelsize&quot;: 11,
+    &quot;figure.dpi&quot;: 120,
+    &quot;savefig.dpi&quot;: 250
+})
+
+
+# ============================================================
+# 2. HELPER FUNCTIONS
+# ============================================================
+
+def find_file(*filenames):
+    &quot;&quot;&quot;Return first existing result file.&quot;&quot;&quot;
+    for filename in filenames:
+        path = results_dir / filename
+
+        if path.exists():
+            return path
+
+    raise FileNotFoundError(
+        &quot;Could not find any of these files:\n&quot;
+        + &quot;\n&quot;.join(filenames)
+    )
+
+
+def save_figure(filename):
+    &quot;&quot;&quot;Save current figure and close it.&quot;&quot;&quot;
+
+    figures_dir.mkdir(parents=True, exist_ok=True)
+
+    output_path = figures_dir / filename
+
+    print(f&quot;Saving: {output_path}&quot;, flush=True)
+
+    try:
+        plt.tight_layout()
+
+        plt.savefig(
+            str(output_path),
+            dpi=200,
+            format=&quot;png&quot;,
+            bbox_inches=&quot;tight&quot;
+        )
+
+        print(f&quot;Saved: {filename}&quot;, flush=True)
+
+    except OSError as e:
+        print(f&quot;\nCould not save to: {output_path}&quot;)
+        print(f&quot;Error: {e}&quot;)
+
+        # Fallback: save directly into Results
+        fallback = results_dir / filename
+
+        print(f&quot;Trying alternative: {fallback}&quot;)
+
+        plt.savefig(
+            str(fallback),
+            dpi=200,
+            format=&quot;png&quot;,
+            bbox_inches=&quot;tight&quot;
+        )
+
+        print(f&quot;Saved to alternative location: {fallback}&quot;)
+
+    finally:
+        plt.close()
+
+
+# ============================================================
+# 3. LOAD DATA
+# ============================================================
+
+# G25 internal model comparison
+g25_metrics = pd.read_csv(
+    results_dir / &quot;05_model_comparison_random.csv&quot;,
+    index_col=0
+)
+
+# G20 independent validation metrics
+g20_metrics = pd.read_csv(
+    find_file(
+        &quot;06b_G20_model_comparison.csv&quot;,
+        &quot;06b_G20model_comparison.csv&quot;
+    )
+)
+
+# G20 actual and predicted occupancy
+g20_predictions = pd.read_csv(
+    find_file(
+        &quot;06b_G20_validation_predictions.csv&quot;,
+        &quot;06b_G20validation_predictions.csv&quot;
+    )
+)
+
+# Convert timestamps
+g20_predictions[&quot;Timestamp&quot;] = pd.to_datetime(
+    g20_predictions[&quot;Timestamp&quot;],
+    utc=True,
+    errors=&quot;coerce&quot;
+).dt.tz_convert(&quot;Australia/Melbourne&quot;)
+
+# Model names
+models = [
+    &quot;Linear Regression&quot;,
+    &quot;Decision Tree&quot;,
+    &quot;SVR&quot;
+]
+
+prediction_columns = {
+    &quot;Linear Regression&quot;: &quot;LinearPredicted&quot;,
+    &quot;Decision Tree&quot;: &quot;TreePredicted&quot;,
+    &quot;SVR&quot;: &quot;SVRPredicted&quot;
+}
+
+# Extract the final selected model from script 05
+def get_g25_row(prefix):
+    matches = [
+        index for index in g25_metrics.index
+        if str(index).startswith(prefix)
+    ]
+
+    if not matches:
+        raise ValueError(
+            f&quot;Could not find G25 model starting with {prefix}&quot;
+        )
+
+    return g25_metrics.loc[matches[-1]]
+
+
+g25_selected = pd.DataFrame({
+    &quot;Linear Regression&quot;: g25_metrics.loc[&quot;Linear Regression&quot;],
+    &quot;Decision Tree&quot;: get_g25_row(&quot;Decision Tree (leaf=100)&quot;),
+    &quot;SVR&quot;: get_g25_row(&quot;SVR Tuned&quot;)
+}).T
+
+g20_selected = (
+    g20_metrics
+    .set_index(&quot;Model&quot;)
+    .loc[models]
+)
+
+print(&quot;\nLoaded G25 and G20 results successfully.&quot;)
+print(&quot;\nG25:&quot;)
+print(g25_selected[[&quot;MAE&quot;, &quot;RMSE&quot;, &quot;R2&quot;]])
+
+print(&quot;\nG20:&quot;)
+print(g20_selected[[&quot;MAE&quot;, &quot;RMSE&quot;, &quot;R2&quot;]])
+
+
+# ============================================================
+# FIGURE 1: INTERNAL VS EXTERNAL RMSE
+# ============================================================
+
+x = np.arange(len(models))
+width = 0.35
+
+fig, ax = plt.subplots(figsize=(9, 5))
+
+ax.bar(
+    x - width / 2,
+    g25_selected[&quot;RMSE&quot;],
+    width,
+    label=&quot;G25 Internal Validation&quot;
+)
+
+ax.bar(
+    x + width / 2,
+    g20_selected[&quot;RMSE&quot;],
+    width,
+    label=&quot;G20 External Validation&quot;
+)
+
+ax.set_xticks(x)
+ax.set_xticklabels(models)
+
+ax.set_ylabel(&quot;RMSE (occupants)&quot;)
+ax.set_title(&quot;Internal vs External Validation RMSE&quot;)
+
+ax.legend()
+ax.grid(axis=&quot;y&quot;, alpha=0.25)
+
+save_figure(&quot;01_internal_vs_external_RMSE.png&quot;)
+
+
+# ============================================================
+# FIGURE 2: INTERNAL VS EXTERNAL R2
+# ============================================================
+
+fig, ax = plt.subplots(figsize=(9, 5))
+
+ax.bar(
+    x - width / 2,
+    g25_selected[&quot;R2&quot;],
+    width,
+    label=&quot;G25 Internal Validation&quot;
+)
+
+ax.bar(
+    x + width / 2,
+    g20_selected[&quot;R2&quot;],
+    width,
+    label=&quot;G20 External Validation&quot;
+)
+
+ax.axhline(0, color=&quot;black&quot;, linewidth=1)
+
+ax.set_xticks(x)
+ax.set_xticklabels(models)
+
+ax.set_ylabel(&quot;R²&quot;)
+ax.set_title(&quot;Model Generalisation: R² Comparison&quot;)
+
+ax.legend()
+ax.grid(axis=&quot;y&quot;, alpha=0.25)
+
+save_figure(&quot;02_internal_vs_external_R2.png&quot;)
+
+
+# ============================================================
+# FIGURE 3: MEAN RESIDUAL / PREDICTION BIAS
+# ============================================================
+
+fig, ax = plt.subplots(figsize=(9, 5))
+
+ax.bar(
+    models,
+    g20_selected[&quot;MeanResidual&quot;]
+)
+
+ax.axhline(
+    0,
+    color=&quot;black&quot;,
+    linestyle=&quot;--&quot;
+)
+
+ax.set_ylabel(&quot;Mean Residual (occupants)&quot;)
+ax.set_title(&quot;G20 Systematic Prediction Bias&quot;)
+
+ax.grid(axis=&quot;y&quot;, alpha=0.25)
+
+save_figure(&quot;03_G20_prediction_bias.png&quot;)
+
+
+# ============================================================
+# FIGURE 4: ACTUAL VS MEAN PREDICTED HEADCOUNT
+# ============================================================
+
+labels = [&quot;Actual&quot;] + models
+
+values = [
+    g20_predictions[&quot;Actual&quot;].mean()
+]
+
+for column in prediction_columns.values():
+    values.append(
+        g20_predictions[column].mean()
+    )
+
+fig, ax = plt.subplots(figsize=(9, 5))
+
+ax.bar(labels, values)
+
+ax.set_ylabel(&quot;Mean Headcount&quot;)
+ax.set_title(&quot;G20 Actual vs Predicted Mean Occupancy&quot;)
+
+ax.tick_params(
+    axis=&quot;x&quot;,
+    rotation=15
+)
+
+ax.grid(axis=&quot;y&quot;, alpha=0.25)
+
+save_figure(&quot;04_G20_mean_headcount.png&quot;)
+
+
+# ============================================================
+# FIGURE 5: OCCUPANCY PATTERNS BY HOUR
+# ============================================================
+
+g20_predictions[&quot;Hour&quot;] = (
+    g20_predictions[&quot;Timestamp&quot;].dt.hour
+)
+
+hourly = g20_predictions.groupby(&quot;Hour&quot;).mean(
+    numeric_only=True
+)
+
+fig, ax = plt.subplots(figsize=(11, 5))
+
+ax.plot(
+    hourly.index,
+    hourly[&quot;Actual&quot;],
+    linewidth=2.5,
+    color=&quot;black&quot;,
+    label=&quot;Actual G20&quot;
+)
+
+for model, column in prediction_columns.items():
+
+    ax.plot(
+        hourly.index,
+        hourly[column],
+        marker=&quot;.&quot;,
+        label=model
+    )
+
+ax.set_xlabel(&quot;Hour of Day (Melbourne)&quot;)
+ax.set_ylabel(&quot;Mean Headcount&quot;)
+ax.set_title(&quot;G20 Average Daily Occupancy Profile&quot;)
+
+ax.set_xticks(range(0, 24, 2))
+
+ax.legend()
+ax.grid(True, alpha=0.25)
+
+save_figure(&quot;05_G20_daily_occupancy.png&quot;)
+
+
+# ============================================================
+# FIGURE 6: MAE BY HOUR OF DAY
+# ============================================================
+
+fig, ax = plt.subplots(figsize=(11, 5))
+
+for model, column in prediction_columns.items():
+
+    errors = (
+        g20_predictions[&quot;Actual&quot;]
+        - g20_predictions[column]
+    ).abs()
+
+    hourly_error = errors.groupby(
+        g20_predictions[&quot;Hour&quot;]
+    ).mean()
+
+    ax.plot(
+        hourly_error.index,
+        hourly_error.values,
+        marker=&quot;.&quot;,
+        label=model
+    )
+
+ax.set_xlabel(&quot;Hour of Day (Melbourne)&quot;)
+ax.set_ylabel(&quot;Mean Absolute Error (occupants)&quot;)
+ax.set_title(&quot;G20 Prediction Error by Hour&quot;)
+
+ax.set_xticks(range(0, 24, 2))
+
+ax.legend()
+ax.grid(True, alpha=0.25)
+
+save_figure(&quot;06_G20_MAE_by_hour.png&quot;)
+
+
+# ============================================================
+# FIGURE 7: MAE BY ACTUAL OCCUPANCY LEVEL
+# ============================================================
+
+bins = [0, 1, 2, 4, 8, 16, np.inf]
+
+band_labels = [
+    &quot;0–1&quot;,
+    &quot;1–2&quot;,
+    &quot;2–4&quot;,
+    &quot;4–8&quot;,
+    &quot;8–16&quot;,
+    &quot;16+&quot;
+]
+
+g20_predictions[&quot;OccupancyBand&quot;] = pd.cut(
+    g20_predictions[&quot;Actual&quot;],
+    bins=bins,
+    labels=band_labels,
+    right=False,
+    include_lowest=True
+)
+
+fig, ax = plt.subplots(figsize=(10, 5))
+
+positions = np.arange(len(band_labels))
+
+for i, (model, column) in enumerate(
+    prediction_columns.items()
+):
+
+    temp = g20_predictions[
+        [&quot;OccupancyBand&quot;, &quot;Actual&quot;, column]
+    ].copy()
+
+    temp[&quot;AbsoluteError&quot;] = (
+        temp[&quot;Actual&quot;] - temp[column]
+    ).abs()
+
+    errors = temp.groupby(
+        &quot;OccupancyBand&quot;,
+        observed=True
+    )[&quot;AbsoluteError&quot;].mean()
+
+    errors = errors.reindex(band_labels)
+
+    ax.bar(
+        positions + (i - 1) * 0.25,
+        errors.to_numpy(),
+        width=0.25,
+        label=model
+    )
+
+ax.set_xticks(positions)
+ax.set_xticklabels(band_labels)
+
+ax.set_xlabel(&quot;Actual Headcount Range&quot;)
+ax.set_ylabel(&quot;Mean Absolute Error&quot;)
+ax.set_title(&quot;G20 Prediction Error by Occupancy Level&quot;)
+
+ax.legend()
+ax.grid(axis=&quot;y&quot;, alpha=0.25)
+
+save_figure(&quot;07_G20_MAE_by_occupancy.png&quot;)
+
+
+# ============================================================
+# FIGURE 8: CUMULATIVE ABSOLUTE ERROR DISTRIBUTION
+# ============================================================
+
+fig, ax = plt.subplots(figsize=(9, 5))
+
+for model, column in prediction_columns.items():
+
+    errors = np.sort(
+        np.abs(
+            g20_predictions[&quot;Actual&quot;]
+            - g20_predictions[column]
+        )
+    )
+
+    cumulative = (
+        np.arange(1, len(errors) + 1)
+        / len(errors)
+    )
+
+    ax.plot(
+        errors,
+        cumulative,
+        label=model
+    )
+
+ax.set_xlim(0, 12)
+ax.set_ylim(0, 1)
+
+ax.set_xlabel(&quot;Absolute Prediction Error (occupants)&quot;)
+ax.set_ylabel(&quot;Cumulative Proportion&quot;)
+ax.set_title(&quot;G20 Cumulative Absolute Error&quot;)
+
+ax.legend()
+ax.grid(True, alpha=0.25)
+
+save_figure(&quot;08_G20_cumulative_error.png&quot;)
+
+
+# ============================================================
+# FIGURE 9: ACTUAL VS PREDICTED (ALL THREE MODELS)
+# ============================================================
+
+for i, (model, column) in enumerate(
+    prediction_columns.items(),
+    start=1
+):
+
+    fig, ax = plt.subplots(figsize=(7, 6))
+
+    plot = ax.hexbin(
+        g20_predictions[&quot;Actual&quot;],
+        g20_predictions[column],
+        gridsize=60,
+        bins=&quot;log&quot;,
+        mincnt=1,
+        cmap=&quot;viridis&quot;
+    )
+
+    fig.colorbar(
+        plot,
+        ax=ax,
+        label=&quot;Log Observation Count&quot;
+    )
+
+    upper = max(
+        float(g20_predictions[&quot;Actual&quot;].max()),
+        float(g20_predictions[column].max())
+    )
+
+    lower = min(
+        0,
+        float(g20_predictions[column].min())
+    )
+
+    ax.plot(
+        [lower, upper],
+        [lower, upper],
+        &quot;r--&quot;,
+        label=&quot;Perfect Prediction&quot;
+    )
+
+    ax.set_xlabel(&quot;Actual G20 Headcount&quot;)
+    ax.set_ylabel(&quot;Predicted G20 Headcount&quot;)
+
+    ax.set_title(
+        f&quot;G20 Actual vs Predicted: {model}&quot;
+    )
+
+    ax.legend()
+    ax.grid(True, alpha=0.15)
+
+    save_figure(
+        f&quot;09_{i}_{model.lower().replace(&#x27; &#x27;, &#x27;_&#x27;)}.png&quot;
+    )
+
+
+# ============================================================
+# FIGURE 10: MODEL PREDICTION RUNTIME
+# ============================================================
+
+fig, ax = plt.subplots(figsize=(9, 5))
+
+times = g20_selected[&quot;PredictionSeconds&quot;]
+
+ax.bar(models, times)
+
+ax.set_yscale(&quot;log&quot;)
+
+ax.set_ylabel(&quot;Prediction Time (seconds, log scale)&quot;)
+ax.set_title(&quot;G20 Full-Dataset Prediction Runtime&quot;)
+
+ax.grid(axis=&quot;y&quot;, alpha=0.25)
+
+save_figure(&quot;10_G20_prediction_runtime.png&quot;)
+
+
+# ============================================================
+# FIGURE 11: DECISION TREE LEAF SIZE OPTIMISATION
+# ============================================================
+
+leaf_file = results_dir / &quot;05_leaf_size_comparison.csv&quot;
+
+if leaf_file.exists():
+
+    leaf_data = pd.read_csv(leaf_file)
+
+    fig, ax = plt.subplots(figsize=(9, 5))
+
+    ax.plot(
+        leaf_data[&quot;LeafSize&quot;],
+        leaf_data[&quot;Train_RMSE&quot;],
+        marker=&quot;o&quot;,
+        label=&quot;Training RMSE&quot;
+    )
+
+    ax.plot(
+        leaf_data[&quot;LeafSize&quot;],
+        leaf_data[&quot;Validation_RMSE&quot;],
+        marker=&quot;o&quot;,
+        label=&quot;Validation RMSE&quot;
+    )
+
+    ax.set_xlabel(&quot;Minimum Samples per Leaf&quot;)
+    ax.set_ylabel(&quot;RMSE (occupants)&quot;)
+    ax.set_title(&quot;Decision Tree Leaf Size Optimisation&quot;)
+
+    ax.legend()
+    ax.grid(True, alpha=0.25)
+
+    save_figure(&quot;11_tree_leaf_optimisation.png&quot;)
+
+
+# ============================================================
+# FIGURE 12: SVR TRAINING SIZE SENSITIVITY
+# ============================================================
+
+# Results from the previous 100k SVR experiment
+old_metrics_file = (
+    results_dir / &quot;05_model_comparison_100k.csv&quot;
+)
+
+if old_metrics_file.exists():
+
+    old_metrics = pd.read_csv(
+        old_metrics_file,
+        index_col=0
+    )
+
+    old_svr_rows = [
+        index for index in old_metrics.index
+        if str(index).startswith(&quot;SVR Tuned&quot;)
+    ]
+
+    if old_svr_rows:
+
+        old_rmse = old_metrics.loc[
+            old_svr_rows[-1],
+            &quot;RMSE&quot;
+        ]
+
+        new_rmse = g25_selected.loc[
+            &quot;SVR&quot;, &quot;RMSE&quot;
+        ]
+
+        fig, ax = plt.subplots(figsize=(8, 5))
+
+        sizes = [100000, 298608]
+        rmses = [old_rmse, new_rmse]
+
+        ax.plot(
+            sizes,
+            rmses,
+            marker=&quot;o&quot;,
+            markersize=8
+        )
+
+        ax.set_xticks(sizes)
+        ax.set_xticklabels([
+            &quot;100,000&quot;,
+            &quot;298,608&quot;
+        ])
+
+        ax.set_xlabel(&quot;SVR Training Observations&quot;)
+        ax.set_ylabel(&quot;G25 Validation RMSE&quot;)
+        ax.set_title(&quot;SVR Training Size Sensitivity&quot;)
+
+        ax.grid(True, alpha=0.25)
+
+        save_figure(&quot;12_SVR_training_size.png&quot;)
+
+else:
+    print(
+        &quot;\nSkipping SVR training-size graph:&quot;
+        &quot; 100k comparison CSV not found.&quot;
+    )
+
+
+# ============================================================
+# FINISHED
+# ============================================================
+
+print(&quot;\n========================================&quot;)
+print(&quot;REPORT FIGURES COMPLETE&quot;)
+print(&quot;========================================&quot;)
+
+print(&quot;\nSaved to:&quot;)
+print(figures_dir)
+
+print(&quot;\nNo models were retrained.&quot;)
+
+
+
+
+rooms = {
+    &quot;G25&quot;: &quot;G25_Model_Train.csv&quot;,
+    &quot;G20&quot;: &quot;G20_Model_Validation_Minute.csv&quot;
+}
+
+bands = [-np.inf, 0, 1, 2, 4, 8, 16, 32, np.inf]
+labels = [
+    &quot;0&quot;, &quot;(0,1]&quot;, &quot;(1,2]&quot;, &quot;(2,4]&quot;,
+    &quot;(4,8]&quot;, &quot;(8,16]&quot;, &quot;(16,32]&quot;, &quot;&gt;32&quot;
+]
+
+distribution = {}
+
+for room, filename in rooms.items():
+    data = pd.read_csv(data_dir / filename)
+    y = data[&quot;Headcount&quot;].dropna()
+
+    print(f&quot;\n{&#x27;=&#x27;*40}&quot;)
+    print(f&quot;{room} HEADCOUNT DISTRIBUTION&quot;)
+    print(f&quot;{&#x27;=&#x27;*40}&quot;)
+
+    print(y.describe(percentiles=[
+        .25, .50, .75, .90, .95, .99
+    ]))
+
+    print(f&quot;\nExactly zero: {(y == 0).mean()*100:.2f}%&quot;)
+    print(f&quot;Above 10 occupants: {(y &gt; 10).mean()*100:.2f}%&quot;)
+
+    counts = pd.cut(
+        y, bins=bands, labels=labels
+    ).value_counts(normalize=True).reindex(labels) * 100
+
+    distribution[room] = counts
+
+    print(&quot;\nOccupancy bands (% of observations):&quot;)
+    print(counts.round(2).to_string())
+
+# Compare occupancy distributions
+
+# ============================================================
+# FIGURE 13: RAW HEADCOUNT DISTRIBUTION - G25 VS G20
+# ============================================================
+
+raw_files = {
+    &quot;G25&quot;: data_dir / &quot;G25_Occupancy.csv&quot;,
+    &quot;G20&quot;: data_dir / &quot;G20_Occupancy.csv&quot;
+}
+
+distributions = {}
+
+for room, filepath in raw_files.items():
+
+    # Load original, unprocessed headcount readings
+    data = pd.read_csv(
+        filepath,
+        usecols=[&quot;headcount&quot;]
+    )
+
+    # Convert to numeric without averaging or resampling
+    headcount = pd.to_numeric(
+        data[&quot;headcount&quot;],
+        errors=&quot;coerce&quot;
+    ).dropna()
+
+    print(f&quot;\n{room} RAW HEADCOUNT DISTRIBUTION&quot;)
+    print(headcount.describe(
+        percentiles=[0.25, 0.50, 0.75, 0.90, 0.95, 0.99]
+    ))
+
+    print(
+        f&quot;Zero occupancy: {(headcount == 0).mean() * 100:.2f}%&quot;
+    )
+
+    distributions[room] = headcount
+
+# Headcount bands, including a separate category for zero
+bins = [-0.5, 0.5, 1.5, 2.5, 4.5, 8.5, 16.5, 32.5, np.inf]
+
+labels = [
+    &quot;0&quot;, &quot;1&quot;, &quot;2&quot;, &quot;3-4&quot;,
+    &quot;5-8&quot;, &quot;9-16&quot;, &quot;17-32&quot;, &quot;33+&quot;
+]
+
+comparison = {}
+
+for room, headcount in distributions.items():
+
+    counts = pd.cut(
+        headcount,
+        bins=bins,
+        labels=labels
+    ).value_counts(normalize=True)
+
+    comparison[room] = (
+        counts.reindex(labels).fillna(0) * 100
+    )
+
+comparison = pd.DataFrame(comparison)
+
+# Plot percentage rather than raw counts
+fig, ax = plt.subplots(figsize=(10, 5.5))
+
+comparison.plot(
+    kind=&quot;bar&quot;,
+    ax=ax,
+    width=0.75
+)
+
+ax.set_title(&quot;Distribution of Original Headcount Measurements&quot;)
+ax.set_xlabel(&quot;Recorded Headcount (occupants)&quot;)
+ax.set_ylabel(&quot;Percentage of Sensor Readings (%)&quot;)
+
+ax.tick_params(axis=&quot;x&quot;, rotation=0)
+ax.legend(title=&quot;Room&quot;)
+ax.grid(axis=&quot;y&quot;, alpha=0.25)
+
+plt.tight_layout()
+
+plt.savefig(
+    figures_dir / &quot;13_raw_headcount_distribution.png&quot;,
+    dpi=250,
+    bbox_inches=&quot;tight&quot;
+)
+
+plt.close()
+
+print(&quot;\nSaved Figure 13: Raw headcount distribution&quot;)
+
+</code></pre></details>
+<footer>Generated by <code>tools/build_html_docs.py</code>. Source links refer to the GitHub <code>main</code> branch. Code is documented by parsing Python source; modules are not imported or executed.</footer></main></div>
+</body></html>

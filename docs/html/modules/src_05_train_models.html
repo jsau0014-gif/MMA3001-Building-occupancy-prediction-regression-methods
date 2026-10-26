@@ -1,0 +1,827 @@
+<!doctype html>
+<html lang="en"><head><meta charset="utf-8"><meta name="viewport" content="width=device-width,initial-scale=1">
+<title>05 · Train and compare regressors | MMA3001 Source Documentation</title>
+<meta name="description" content="Numerical methods and machine learning source documentation for Building Occupancy Prediction at Monash University.">
+<link rel="stylesheet" href="../assets/style.css"></head><body>
+<div class="shell"><aside class="side"><div class="brand"><small>MMA3001 · 2026</small>Building Occupancy<br>Source Documentation</div>
+<div class="side-links"><a href="../index.html" class="">Overview &amp; workflow</a><div class="subhead">Main source modules</div><a class="" href="../modules/src_01_Extract_Occupancy_Data.html">01_Extract_Occupancy_Data.py</a><a class="" href="../modules/src_02_Inspect_Occupancy_Data.html">02_Inspect_Occupancy_Data.py</a><a class="" href="../modules/src_03_preprocess_training.html">03_preprocess_training.py</a><a class="" href="../modules/src_03b_preprocess_G20.html">03b_preprocess_G20.py</a><a class="" href="../modules/src_04_feature_engineering.html">04_feature_engineering.py</a><a class="" href="../modules/src_04b_feature_engineering_G20.html">04b_feature_engineering_G20.py</a><a class="active" href="../modules/src_05_train_models.html">05_train_models.py</a><a class="" href="../modules/src_06b_validate_G20_minute.html">06b_validate_G20_minute.py</a><a class="" href="../modules/src_07_generate_report_figures.html">07_generate_report_figures.py</a><div class="subhead">Earlier implementations</div><a href="../modules/src_03_Preprocess_hourly.html" class="">03_Preprocess_hourly.py</a><a href="../modules/src_06_validate_G20.html" class="">06_validate_G20.py</a><div class="subhead">Other resources</div><a href="https://github.com/jsau0014-gif/MMA3001-Building-occupancy-prediction-regression-methods/tree/main/tests">Pytest source ↗</a><a href="https://github.com/jsau0014-gif/MMA3001-Building-occupancy-prediction-regression-methods/blob/main/docs/TEST_REPORT.md">Test report ↗</a><a href="https://github.com/jsau0014-gif/MMA3001-Building-occupancy-prediction-regression-methods/blob/main/README.md">README &amp; setup ↗</a></div></aside><main class="main">
+    <div class="breadcrumb"><a href="../index.html">Overview</a> / src/05_train_models.py</div>
+    <div class="eyebrow">Source module · Model development</div>
+    <h1>05 · Train and compare regressors</h1>
+    <p class="lead">Uses a shuffled, reproducible 80/20 split of G.25 (random_state=42). Fits Multiple Linear Regression, a tuned Decision Tree and a scaled RBF Support Vector Regressor. Computes MAE, RMSE and R² against a training-mean baseline; records tuning sensitivity and plots.</p>
+    <div><span class="tag ">Model development</span> <span class="small muted">809 lines indexed locally</span> ·
+    <a target="_blank" rel="noopener" href="https://github.com/jsau0014-gif/MMA3001-Building-occupancy-prediction-regression-methods/blob/main/src/05_train_models.py">View current source on GitHub ↗</a></div>
+    <div class="cards">
+    <section class="card"><h3>Required inputs</h3><ul class="path-list"><li><code>Data/processed/G25_Model_Train.csv</code></li></ul></section>
+    <section class="card"><h3>Files and results produced</h3><ul class="path-list"><li><code>Results/05_model_comparison_random.csv</code></li><li><code>Results/05_linear_model.joblib</code></li><li><code>Results/05_decision_tree.joblib</code></li><li><code>Results/05_svr_model_full.joblib</code></li><li><code>Results/05_*.png and CSV evaluation artefacts</code></li></ul></section>
+    </div><div class="warn"><strong>Usage notes and limitations</strong><ul><li>The full 298,608-row RBF SVR training may take several hours.</li><li>An old header comment refers to a chronological split; the actual implementation uses train_test_split with shuffle=True.</li><li>The saved full SVR checkpoint is named 05_svr_model_full.joblib.</li></ul></div><h2>Function reference</h2><p class="muted small">Signatures and line numbers are extracted from the local production source without executing it.</p><div class="card"><section class="function"><h3>def regression_metrics(y_true, y_pred):</h3><span class="small muted">Defined at source line 123</span><p>Evaluate regression prediction accuracy using an absolute-error, squared-error and variance-explained summary.</p><p><strong>Input:</strong> y_true: observed headcounts; y_pred: predicted headcounts</p><p><strong>Output:</strong> Dictionary with MAE, RMSE and R2.</p></section></div><h2>Source listing</h2><p class="muted small">The source below is a static copy from the local working tree at the time documentation was built; refresh after code changes.</p><details><summary>Expand full source code (HTML escaped)</summary><pre><code>&quot;&quot;&quot;
+This script will train a a multiple linear regression model for the first
+80% of the training data (from g25) leaving the final 20% for validation.
+It uses LinearRegression functions from scikit
+
+The script will produce a predicted vs acutal headcounts
+A residual plot to identify systematic patterns
+
+&quot;&quot;&quot;
+
+import pandas as pd
+import numpy as np
+import matplotlib.pyplot as plt
+import time
+
+from pathlib import Path
+
+from sklearn.model_selection import ParameterGrid
+from sklearn.svm import SVR
+from sklearn.preprocessing import StandardScaler
+from sklearn.pipeline import make_pipeline
+from sklearn.tree import DecisionTreeRegressor
+from sklearn.linear_model import LinearRegression
+from sklearn.model_selection import train_test_split
+from sklearn.metrics import (
+    mean_absolute_error,
+    mean_squared_error,
+    r2_score
+)
+
+#setting up file locations
+
+project_dir = Path(__file__).resolve().parent.parent
+
+data_dir = project_dir / &quot;Data&quot; / &quot;processed&quot;
+results_dir = project_dir / &quot;Results&quot;
+
+results_dir.mkdir(parents=True, exist_ok=True)
+
+inpute_file = data_dir / &quot;G25_Model_Train.csv&quot;
+
+#pull the training dataset
+data = pd.read_csv(inpute_file)
+
+data[&quot;Timestamp&quot;] = pd.to_datetime(
+    data[&quot;Timestamp&quot;],
+    utc=True
+).dt.tz_convert(&quot;Australia/Melbourne&quot;)
+
+#Model Inputs from script 4
+features = [
+    &quot;TimeSin&quot;,
+    &quot;TimeCos&quot;,
+    &quot;DaySin&quot;,
+    &quot;DayCos&quot;,
+    &quot;MonthSin&quot;,
+    &quot;MonthCos&quot;,
+    &quot;IsWeekend&quot;
+]
+
+
+
+
+#splitting data chronoligically 80/20
+data = data.sort_values(&quot;Timestamp&quot;).reset_index(drop=True)
+
+#placing inputs in X array and outputs in Y array
+X = data[features]
+y = data[&quot;Headcount&quot;]
+
+print(&quot;\nTotal observations:&quot;, len(data))
+print(&quot;Number of input features:&quot;, X.shape[1])
+
+X_train, X_validation, y_train, y_validation = train_test_split(
+    X,
+    y,
+    test_size=0.20,
+    random_state=42,
+    shuffle=True
+)
+
+print(&quot;\nTraining observations:&quot;, len(X_train))
+print(&quot;Validation observations:&quot;, len(X_validation))
+
+print(&quot;\nTraining mean:&quot;, y_train.mean())
+print(&quot;Validation mean:&quot;, y_validation.mean())
+
+print(&quot;\nTraining standard deviation:&quot;, y_train.std())
+print(&quot;Validation standard deviation:&quot;, y_validation.std())
+
+print(&quot;\nTraining date range:&quot;)
+print(data.loc[X_train.index, &quot;Timestamp&quot;].min())
+print(data.loc[X_train.index, &quot;Timestamp&quot;].max())
+
+print(&quot;\nValidation date range:&quot;)
+print(data.loc[X_validation.index, &quot;Timestamp&quot;].min())
+print(data.loc[X_validation.index, &quot;Timestamp&quot;].max())
+
+print(&quot;\nTraining observations:&quot;, len(X_train))
+print(&quot;Validation observations:&quot;, len(X_validation))
+
+#Training Linear Regression Model
+linear_model = LinearRegression()
+
+linear_model.fit(X_train, y_train)
+
+#predict witheld observations
+linear_prediction = linear_model.predict(
+    X_validation
+)
+
+#calculating baseline predictions
+#goal is to predict the mean training headcount
+
+training_mean = y_train.mean()
+
+baseline_prediction = np.full(
+    shape=len(y_validation),
+    fill_value=training_mean
+)
+
+#creating a function to calculate regression metrics
+def regression_metrics(y_true, y_pred):
+
+    mse = mean_squared_error(y_true, y_pred)
+
+    return{
+        &quot;MAE&quot;:mean_absolute_error(y_true, y_pred),
+        &quot;RMSE&quot; : np.sqrt(mse),
+        &quot;R2&quot; : r2_score(y_true, y_pred)
+
+    }
+#compare model against baseline
+metrics = pd.DataFrame({
+    &quot;Linear Regression&quot;: regression_metrics(
+        y_validation,
+        linear_prediction
+    ),
+    &quot;Mean Baseline&quot; : regression_metrics(
+        y_validation,
+        baseline_prediction
+    )
+}).T
+
+#Setting up Decision Tree Regression
+# ---------------------------------------------
+# Decision Tree Regression - Leaf Size Tuning
+# ---------------------------------------------
+
+# Keep maximum depth constant
+max_depth = 30
+
+# Test different minimum leaf sizes
+leaf_sizes = [10, 20, 50, 75, 100, 150, 200, 300, 500]
+
+tree_models = {}
+tree_results = []
+
+for leaf_size in leaf_sizes:
+
+    # Create decision tree
+    tree_model = DecisionTreeRegressor(
+        max_depth=max_depth,
+        min_samples_leaf=leaf_size,
+        random_state=42
+    )
+
+    # Train model
+    tree_model.fit(X_train, y_train)
+
+    # Generate predictions
+    train_prediction = tree_model.predict(X_train)
+    validation_prediction = tree_model.predict(X_validation)
+
+    # Calculate training RMSE
+    train_rmse = np.sqrt(
+        mean_squared_error(y_train, train_prediction)
+    )
+
+    # Calculate validation metrics
+    val_metrics = regression_metrics(
+        y_validation,
+        validation_prediction
+    )
+
+    # Store fitted tree
+    tree_models[leaf_size] = tree_model
+
+    # Store performance and complexity
+    tree_results.append({
+        &quot;LeafSize&quot;: leaf_size,
+        &quot;ActualDepth&quot;: tree_model.get_depth(),
+        &quot;Leaves&quot;: tree_model.get_n_leaves(),
+        &quot;Train_RMSE&quot;: train_rmse,
+        &quot;Validation_MAE&quot;: val_metrics[&quot;MAE&quot;],
+        &quot;Validation_RMSE&quot;: val_metrics[&quot;RMSE&quot;],
+        &quot;Validation_R2&quot;: val_metrics[&quot;R2&quot;]
+    })
+
+    # Add to overall model comparison
+    metrics.loc[
+        f&quot;Decision Tree (leaf={leaf_size})&quot;
+    ] = val_metrics
+
+
+# ---------------------------------------------
+# Compare leaf sizes
+# ---------------------------------------------
+
+leaf_comparison = pd.DataFrame(tree_results)
+
+print(&quot;\nDecision Tree Leaf Size Comparison:&quot;)
+print(leaf_comparison.to_string(index=False))
+
+# Find leaf size with lowest validation RMSE
+best_row = leaf_comparison.loc[
+    leaf_comparison[&quot;Validation_RMSE&quot;].idxmin()
+]
+
+best_leaf = int(best_row[&quot;LeafSize&quot;])
+
+# Retrieve best decision tree
+best_tree = tree_models[best_leaf]
+
+best_depth = best_tree.get_depth()
+
+# Predict with best tree
+tree_prediction = best_tree.predict(X_validation)
+
+print(&quot;\nBest minimum leaf size:&quot;, best_leaf)
+print(&quot;Actual tree depth:&quot;, best_depth)
+print(&quot;Number of leaves:&quot;, best_tree.get_n_leaves())
+
+# Save comparison
+leaf_comparison.to_csv(
+    results_dir / &quot;05_leaf_size_comparison.csv&quot;,
+    index=False
+)
+
+
+# ---------------------------------------------
+# Plot leaf size vs training/validation error
+# ---------------------------------------------
+
+plt.figure(figsize=(10, 6))
+
+plt.plot(
+    leaf_comparison[&quot;LeafSize&quot;],
+    leaf_comparison[&quot;Train_RMSE&quot;],
+    marker=&quot;o&quot;,
+    label=&quot;Training RMSE&quot;
+)
+
+plt.plot(
+    leaf_comparison[&quot;LeafSize&quot;],
+    leaf_comparison[&quot;Validation_RMSE&quot;],
+    marker=&quot;o&quot;,
+    label=&quot;Validation RMSE&quot;
+)
+
+# Reference: linear regression performance
+plt.axhline(
+    y=metrics.loc[&quot;Linear Regression&quot;, &quot;RMSE&quot;],
+    linestyle=&quot;--&quot;,
+    color=&quot;red&quot;,
+    label=&quot;Linear regression RMSE&quot;
+)
+
+plt.xlabel(&quot;Minimum Samples per Leaf&quot;)
+plt.ylabel(&quot;RMSE (occupants)&quot;)
+plt.title(&quot;Decision Tree: Leaf Size vs Prediction Error&quot;)
+
+plt.xticks(leaf_sizes, rotation=45)
+plt.legend()
+plt.grid(True, alpha=0.3)
+plt.tight_layout()
+
+plt.savefig(
+    results_dir / &quot;05_leaf_size_comparison.png&quot;,
+    dpi=200
+)
+
+#Setting Up SVR Regression 
+#Number of observations used to train svr
+tuning_sample_size = 30000
+
+#selecting random sample from g25 traiing data
+X_tuning_sample = X_train.sample(
+    n=tuning_sample_size,
+    random_state=42 #should pull the same 5000 data set each run
+)
+
+#select corresponding target values with mask
+y_tuning_sample = y_train.loc[X_tuning_sample.index]
+
+
+#splite tuning sample into fitting and tuning subsets
+X_svr_fit, X_svr_tune, y_svr_fit, y_svr_tune = train_test_split(
+    X_tuning_sample,
+    y_tuning_sample,
+    test_size=0.2,
+    random_state=42
+)
+
+#defining parameters to tune
+parameter_grid = {
+    &quot;C&quot;:[100],
+    &quot;epsilon&quot;: [1.0],
+    &quot;gamma&quot; : [0.6]
+}
+
+configurations = list(ParameterGrid(parameter_grid))
+
+tuning_results = []
+
+print(&quot;\nSVR Hyperparameter Tuning&quot;)
+print(&quot;Fitting observations:&quot;, len(X_svr_fit))
+print(&quot;Tuning observations:&quot;, len(X_svr_tune))
+print(&quot;Configurations:&quot;, len(configurations))
+
+#loopig through each parameter change 
+for i, params in enumerate(configurations, start=1):
+
+    svr_tuning_model = make_pipeline(
+        StandardScaler(),
+        SVR(
+            kernel=&quot;rbf&quot;,
+            C=params[&quot;C&quot;],
+            epsilon=params[&quot;epsilon&quot;],
+            gamma=params[&quot;gamma&quot;]
+        )
+    )
+
+    start_time = time.perf_counter()
+
+    svr_tuning_model.fit(X_svr_fit, y_svr_fit)
+
+    training_time = time.perf_counter() - start_time
+
+    #predict internal tuning data
+    tuning_prediction = svr_tuning_model.predict(X_svr_tune)
+
+    #Calculate Accuracy
+    tuning_metrics = regression_metrics(
+        y_svr_tune,
+        tuning_prediction
+    )
+
+    support_vectors = len(
+        svr_tuning_model.named_steps[&quot;svr&quot;].support_
+    )
+
+    tuning_results.append({
+        &quot;C&quot;: params[&quot;C&quot;],
+        &quot;epsilon&quot;: params[&quot;epsilon&quot;],
+        &quot;gamma&quot;: params[&quot;gamma&quot;],
+        &quot;MAE&quot;: tuning_metrics[&quot;MAE&quot;],
+        &quot;RMSE&quot;: tuning_metrics[&quot;RMSE&quot;],
+        &quot;R2&quot;: tuning_metrics[&quot;R2&quot;],
+        &quot;TrainingTime&quot;: training_time,
+        &quot;SupportVectors&quot;: support_vectors
+    })
+    
+    print(
+        f&quot;{i:02d}/{len(configurations)} | &quot;
+        f&quot;C={params[&#x27;C&#x27;]} | &quot;
+        f&quot;epsilon={params[&#x27;epsilon&#x27;]} | &quot;
+        f&quot;gamma={params[&#x27;gamma&#x27;]} | &quot;
+        f&quot;RMSE={tuning_metrics[&#x27;RMSE&#x27;]:.4f} | &quot;
+        f&quot;Time={training_time:.2f}s&quot;
+    )
+
+#comparing tuning results
+tuning_comparison = pd.DataFrame(tuning_results)
+
+#sort config by lowest RMSE
+tuning_comparison = tuning_comparison.sort_values(
+    &quot;RMSE&quot;
+).reset_index(drop=True)
+
+print(&quot;\nSVR Tuning Results:&quot;)
+print(tuning_comparison.to_string(index=False))
+
+#save full tuning results
+tuning_comparison.to_csv(
+    results_dir / &quot;05_svr_tuning_round2.csv&quot;,
+    index=False
+)
+
+# ---------------------------------------------
+# SVR Hyperparameter Tuning Graph
+# ---------------------------------------------
+
+plt.figure(figsize=(9, 5))
+
+for epsilon in sorted(tuning_comparison[&quot;epsilon&quot;].unique()):
+
+    subset = tuning_comparison[
+        tuning_comparison[&quot;epsilon&quot;] == epsilon
+    ].sort_values(&quot;C&quot;)
+
+    plt.plot(
+        subset[&quot;C&quot;],
+        subset[&quot;RMSE&quot;],
+        marker=&quot;o&quot;,
+        label=f&quot;Epsilon = {epsilon}&quot;
+    )
+
+plt.xlabel(&quot;Regularisation Parameter C&quot;)
+plt.ylabel(&quot;Tuning RMSE (occupants)&quot;)
+plt.title(&quot;SVR Hyperparameter Tuning: C vs RMSE&quot;)
+plt.legend()
+plt.grid(True, alpha=0.3)
+plt.tight_layout()
+
+plt.savefig(
+    results_dir / &quot;05_svr_hyperparameter_tuning.png&quot;,
+    dpi=200
+)
+
+
+#Extracting best params
+best_params = tuning_comparison.iloc[0]
+
+best_C=float(best_params[&quot;C&quot;])
+best_epsilon = float(best_params[&quot;epsilon&quot;])
+best_gamma = best_params[&quot;gamma&quot;]
+
+print(&quot;\nBest SVR Parameters:&quot;)
+print(&quot;C:&quot;, best_C)
+print(&quot;epsilon:&quot;, best_epsilon)
+print(&quot;gamma:&quot;, best_gamma)
+
+#use best param config on full 50 000 observations
+
+svr_sample_size=len(X_train)
+
+X_svr_train = X_train.sample(
+    n=svr_sample_size,
+    random_state=42
+)
+
+y_svr_train = y_train.loc[X_svr_train.index]
+
+svr_model = make_pipeline(
+    StandardScaler(),
+    SVR(
+        kernel=&quot;rbf&quot;,
+        C=best_C,
+        epsilon=best_epsilon,
+        gamma=best_gamma
+    )
+)
+
+print(&quot;\nTraining best SVR on&quot;, svr_sample_size, &quot;observations&quot;)
+
+start_time = time.perf_counter()
+
+svr_model.fit(X_svr_train, y_svr_train)
+
+training_time = time.perf_counter() - start_time
+
+print(f&quot;SVR training time: {training_time:.2f} seconds&quot;)
+
+# Predict using the original G25 validation data
+prediction_start = time.perf_counter()
+
+svr_prediction = svr_model.predict(X_validation)
+
+prediction_time = time.perf_counter() - prediction_start
+
+print(f&quot;SVR prediction time: {prediction_time:.2f} seconds&quot;)
+
+# Calculate final validation performance
+svr_metrics = regression_metrics(
+    y_validation,
+    svr_prediction
+)
+
+metrics.loc[
+    f&quot;SVR Tuned (n={svr_sample_size})&quot;
+] = svr_metrics
+
+n_support_vectors = len(
+    svr_model.named_steps[&quot;svr&quot;].support_
+)
+
+print(&quot;Number of support vectors:&quot;, n_support_vectors)
+
+print(&quot;\nTuned SVR Validation Performance:&quot;)
+print(svr_metrics)
+
+
+
+
+print(&quot;\nRegression performance:&quot;)
+print(metrics.to_string())
+
+print(&quot;\nMean training headcount:&quot;, round(training_mean,4))
+print(&quot;\nTraining mean:&quot;, y_train.mean())
+print(&quot;Validation mean:&quot;, y_validation.mean())
+
+print(&quot;\nTraining standard deviation:&quot;, y_train.std())
+print(&quot;Validation standard deviation:&quot;, y_validation.std())
+
+metrics.to_csv(
+    results_dir / &quot;05_model_comparison_random.csv&quot;
+)
+
+#checking learned coefficinets
+coefficients = pd.DataFrame({
+    &quot;Feature&quot; : features,
+    &quot;Coefficient&quot; : linear_model.coef_
+})
+
+print(&quot;\nLinear regression intercept:&quot;)
+print(linear_model.intercept_)
+
+print(&quot;\nFeature coefficients:&quot;)
+print(coefficients.to_string(index=False))
+
+coefficients.to_csv(
+    results_dir / &quot;05_linear_coefficients.csv&quot;,
+    index=False
+)
+
+#storing validation results
+validation_results = pd.DataFrame({
+    &quot;Timestamp&quot;: data.loc[
+        X_validation.index, &quot;Timestamp&quot;
+    ],
+    &quot;Actual&quot;: y_validation,
+    &quot;Predicted&quot;: linear_prediction,
+    &quot;TreePredicted&quot;: tree_prediction,
+    &quot;SVRPredicted&quot;: svr_prediction
+})
+
+validation_results[&quot;Residual&quot;] = (
+    validation_results[&quot;Actual&quot;]
+    - validation_results[&quot;Predicted&quot;]
+)
+validation_results[&quot;TreeResidual&quot;] = (
+    validation_results[&quot;Actual&quot;]
+    - validation_results[&quot;TreePredicted&quot;]
+)
+
+validation_results[&quot;SVRResidual&quot;] = (
+    validation_results[&quot;Actual&quot;]
+    - validation_results[&quot;SVRPredicted&quot;]
+)
+
+validation_results.to_csv(
+    results_dir / &quot;05_linear_validation_results.csv&quot;,
+    index=False
+)
+
+#Plotting predicted vs actual headcount
+plt.figure(figsize=(8, 6))
+
+plt.hexbin(
+    validation_results[&quot;Actual&quot;],
+    validation_results[&quot;Predicted&quot;],
+    gridsize=55,
+    bins=&quot;log&quot;,
+    mincnt=1,
+    cmap=&quot;viridis&quot;
+)
+
+plt.colorbar(label=&quot;Log observation count&quot;)
+
+# Ideal prediction line
+upper = max(
+    validation_results[&quot;Actual&quot;].max(),
+    validation_results[&quot;Predicted&quot;].max()
+)
+
+plt.plot(
+    [0, upper],
+    [0, upper],
+    &quot;r--&quot;,
+    label=&quot;Perfect prediction&quot;
+)
+
+plt.xlabel(&quot;Actual headcount&quot;)
+plt.ylabel(&quot;Predicted headcount&quot;)
+plt.title(&quot;G25 Linear Regression: Predicted vs Actual&quot;)
+plt.legend()
+plt.grid(True, alpha=0.3)
+plt.tight_layout()
+
+plt.savefig(
+    results_dir / &quot;05_predicted_vs_actual.png&quot;,
+    dpi=200
+)
+
+#plotting residuals
+
+# ---------------------------------------------
+# Linear Regression Residual Plot
+# ---------------------------------------------
+
+plt.figure(figsize=(9, 5))
+
+plt.scatter(
+    validation_results[&quot;Predicted&quot;],
+    validation_results[&quot;Residual&quot;],
+    s=3,
+    alpha=0.15
+)
+
+plt.axhline(
+    0,
+    color=&quot;red&quot;,
+    linestyle=&quot;--&quot;
+)
+
+plt.xlabel(&quot;Predicted headcount&quot;)
+plt.ylabel(&quot;Residual (Actual - Predicted)&quot;)
+plt.title(&quot;G25 Linear Regression Residuals&quot;)
+plt.grid(True, alpha=0.3)
+plt.tight_layout()
+
+plt.savefig(
+    results_dir / &quot;05_residuals.png&quot;,
+    dpi=200
+)
+
+
+# ---------------------------------------------
+# SVR Predicted vs Actual
+# ---------------------------------------------
+
+plt.figure(figsize=(8, 6))
+
+plt.hexbin(
+    validation_results[&quot;Actual&quot;],
+    validation_results[&quot;SVRPredicted&quot;],
+    gridsize=55,
+    bins=&quot;log&quot;,
+    mincnt=1,
+    cmap=&quot;viridis&quot;
+)
+
+plt.colorbar(label=&quot;Log observation count&quot;)
+
+# Perfect prediction reference line
+upper = max(
+    validation_results[&quot;Actual&quot;].max(),
+    validation_results[&quot;SVRPredicted&quot;].max()
+)
+
+plt.plot(
+    [0, upper],
+    [0, upper],
+    &quot;r--&quot;,
+    label=&quot;Perfect prediction&quot;
+)
+
+plt.xlabel(&quot;Actual headcount&quot;)
+plt.ylabel(&quot;Predicted headcount&quot;)
+plt.title(&quot;G25 SVR: Predicted vs Actual&quot;)
+plt.legend()
+plt.grid(True, alpha=0.3)
+plt.tight_layout()
+
+plt.savefig(
+    results_dir / &quot;05_svr_predicted_vs_actual.png&quot;,
+    dpi=200
+)
+
+#decision tree residual plot
+plt.figure(figsize=(9, 5))
+
+plt.scatter(
+    validation_results[&quot;TreePredicted&quot;],
+    validation_results[&quot;TreeResidual&quot;],
+    s=3,
+    alpha=0.15
+)
+
+plt.axhline(
+    0,
+    color=&quot;red&quot;,
+    linestyle=&quot;--&quot;
+)
+
+plt.xlabel(&quot;Predicted headcount&quot;)
+plt.ylabel(&quot;Residual (Actual - Predicted)&quot;)
+plt.title(f&quot;G25 Decision Tree Residuals (Depth {best_depth})&quot;)
+plt.grid(True, alpha=0.3)
+plt.tight_layout()
+
+plt.savefig(
+    results_dir / &quot;05_tree_residuals.png&quot;,
+    dpi=200
+)
+
+# ---------------------------------------------
+# SVR Residual Plot
+# ---------------------------------------------
+
+plt.figure(figsize=(9, 5))
+
+plt.scatter(
+    validation_results[&quot;SVRPredicted&quot;],
+    validation_results[&quot;SVRResidual&quot;],
+    s=3,
+    alpha=0.15
+)
+
+plt.axhline(
+    0,
+    color=&quot;red&quot;,
+    linestyle=&quot;--&quot;
+)
+
+plt.xlabel(&quot;Predicted headcount&quot;)
+plt.ylabel(&quot;Residual (Actual - Predicted)&quot;)
+plt.title(&quot;G25 Support Vector Regression Residuals&quot;)
+plt.grid(True, alpha=0.3)
+plt.tight_layout()
+
+plt.savefig(
+    results_dir / &quot;05_svr_residuals.png&quot;,
+    dpi=200
+)
+
+
+#comparing predictions over time
+start = validation_results[&quot;Timestamp&quot;].min()
+end = start + pd.Timedelta(days=7)
+
+sample = validation_results[
+    (validation_results[&quot;Timestamp&quot;] &gt;= start) &amp;
+    (validation_results[&quot;Timestamp&quot;] &lt; end)
+]
+
+plt.figure(figsize=(13, 5))
+
+plt.scatter(
+    sample[&quot;Timestamp&quot;],
+    sample[&quot;Actual&quot;],
+    s=8,
+    alpha=0.6,
+    label=&quot;Actual&quot;
+)
+
+plt.scatter(
+    sample[&quot;Timestamp&quot;],
+    sample[&quot;Predicted&quot;],
+    s=8,
+    alpha=0.6,
+    label=&quot;Linear regression prediction&quot;
+)
+
+plt.scatter(
+    sample[&quot;Timestamp&quot;],
+    sample[&quot;TreePredicted&quot;],
+    s=8,
+    alpha=0.6,
+    label=f&quot;Decision tree (depth={best_depth})&quot;
+)
+
+plt.scatter(
+    sample[&quot;Timestamp&quot;],
+    sample[&quot;SVRPredicted&quot;],
+    s=8,
+    alpha=0.6,
+    label=f&quot;SVR (C={best_C}, epsilon={best_epsilon})&quot;
+)
+
+plt.xlabel(&quot;Time&quot;)
+plt.ylabel(&quot;Headcount&quot;)
+plt.title(&quot;G25 Validation: Actual vs Predicted Occupancy&quot;)
+plt.legend()
+plt.grid(True, alpha=0.3)
+plt.tight_layout()
+
+plt.savefig(
+    results_dir / &quot;05_occupancy_prediction.png&quot;,
+    dpi=200
+)
+
+print(&quot;\nResults saved to:&quot;, results_dir)
+
+plt.close(&quot;all&quot;)
+
+# ---------------------------------------------
+# Save fitted G25 models for G20 validation
+# ---------------------------------------------
+
+import joblib
+
+joblib.dump(
+    linear_model,
+    results_dir / &quot;05_linear_model.joblib&quot;
+)
+
+joblib.dump(
+    best_tree,
+    results_dir / &quot;05_decision_tree.joblib&quot;
+)
+
+joblib.dump(
+    svr_model,
+    results_dir / &quot;05_svr_model_full.joblib&quot;
+)
+
+print(&quot;\nAll three fitted G25 models saved successfully.&quot;)</code></pre></details>
+<footer>Generated by <code>tools/build_html_docs.py</code>. Source links refer to the GitHub <code>main</code> branch. Code is documented by parsing Python source; modules are not imported or executed.</footer></main></div>
+</body></html>

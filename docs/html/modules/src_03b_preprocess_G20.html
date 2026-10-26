@@ -1,0 +1,262 @@
+<!doctype html>
+<html lang="en"><head><meta charset="utf-8"><meta name="viewport" content="width=device-width,initial-scale=1">
+<title>03b · Time-weighted G.20 averages | MMA3001 Source Documentation</title>
+<meta name="description" content="Numerical methods and machine learning source documentation for Building Occupancy Prediction at Monash University.">
+<link rel="stylesheet" href="../assets/style.css"></head><body>
+<div class="shell"><aside class="side"><div class="brand"><small>MMA3001 · 2026</small>Building Occupancy<br>Source Documentation</div>
+<div class="side-links"><a href="../index.html" class="">Overview &amp; workflow</a><div class="subhead">Main source modules</div><a class="" href="../modules/src_01_Extract_Occupancy_Data.html">01_Extract_Occupancy_Data.py</a><a class="" href="../modules/src_02_Inspect_Occupancy_Data.html">02_Inspect_Occupancy_Data.py</a><a class="" href="../modules/src_03_preprocess_training.html">03_preprocess_training.py</a><a class="active" href="../modules/src_03b_preprocess_G20.html">03b_preprocess_G20.py</a><a class="" href="../modules/src_04_feature_engineering.html">04_feature_engineering.py</a><a class="" href="../modules/src_04b_feature_engineering_G20.html">04b_feature_engineering_G20.py</a><a class="" href="../modules/src_05_train_models.html">05_train_models.py</a><a class="" href="../modules/src_06b_validate_G20_minute.html">06b_validate_G20_minute.py</a><a class="" href="../modules/src_07_generate_report_figures.html">07_generate_report_figures.py</a><div class="subhead">Earlier implementations</div><a href="../modules/src_03_Preprocess_hourly.html" class="">03_Preprocess_hourly.py</a><a href="../modules/src_06_validate_G20.html" class="">06_validate_G20.py</a><div class="subhead">Other resources</div><a href="https://github.com/jsau0014-gif/MMA3001-Building-occupancy-prediction-regression-methods/tree/main/tests">Pytest source ↗</a><a href="https://github.com/jsau0014-gif/MMA3001-Building-occupancy-prediction-regression-methods/blob/main/docs/TEST_REPORT.md">Test report ↗</a><a href="https://github.com/jsau0014-gif/MMA3001-Building-occupancy-prediction-regression-methods/blob/main/README.md">README &amp; setup ↗</a></div></aside><main class="main">
+    <div class="breadcrumb"><a href="../index.html">Overview</a> / src/03b_preprocess_G20.py</div>
+    <div class="eyebrow">Source module · Numerical preprocessing</div>
+    <h1>03b · Time-weighted G.20 averages</h1>
+    <p class="lead">Applies the same cumulative zero-order-hold occupancy–time integration to G.20, producing like-for-like one-minute averages for independent cross-room validation.</p>
+    <div><span class="tag ">Numerical preprocessing</span> <span class="small muted">243 lines indexed locally</span> ·
+    <a target="_blank" rel="noopener" href="https://github.com/jsau0014-gif/MMA3001-Building-occupancy-prediction-regression-methods/blob/main/src/03b_preprocess_G20.py">View current source on GitHub ↗</a></div>
+    <div class="cards">
+    <section class="card"><h3>Required inputs</h3><ul class="path-list"><li><code>Data/processed/G20_Occupancy.csv</code></li></ul></section>
+    <section class="card"><h3>Files and results produced</h3><ul class="path-list"><li><code>Data/processed/G20_Minute_validation.csv</code></li></ul></section>
+    </div><div class="warn"><strong>Usage notes and limitations</strong><ul><li>Minutes without original readings are omitted; long measurement gaps remain a modelling limitation.</li><li>The legacy top-level script docstring mentions hourly sampling, but the implementation produces minute averages.</li></ul></div><h2>Function reference</h2><p class="muted small">Signatures and line numbers are extracted from the local production source without executing it.</p><div class="card"><section class="function"><h3>def integral_at(boundaries_ns):</h3><span class="small muted">Defined at source line 91</span><p>Evaluate the cumulative zero-order-hold occupancy–time integral at the given timestamp boundaries.</p><p><strong>Input:</strong> boundaries_ns: array-like integer nanosecond timestamp boundaries</p><p><strong>Output:</strong> Array of integrated occupancy × time at each requested boundary; used to form minute-average differences.</p><details><summary>Original Python docstring</summary><pre><code>Cumulative headcount × time at each boundary.</code></pre></details></section></div><h2>Source listing</h2><p class="muted small">The source below is a static copy from the local working tree at the time documentation was built; refresh after code changes.</p><details><summary>Expand full source code (HTML escaped)</summary><pre><code>&quot;&quot;&quot;
+This script extracts the occupancy count at the end of each hour to 
+standardise an hourly resolution accross both rooms which currenty are 
+recorded at irregular inteverals.
+This allows for unbiased modelling
+&quot;&quot;&quot;
+
+import pandas as pd
+import numpy as np
+from pathlib import Path
+import matplotlib.pyplot as plt
+
+project_Dir = Path(__file__).resolve().parent.parent
+data_dir = project_Dir / &quot;Data&quot; / &quot;processed&quot;
+
+
+input_file = data_dir / &quot;G20_Occupancy.csv&quot;
+output_file = data_dir / &quot;G20_Minute_validation.csv&quot;
+
+#loading training data
+data = pd.read_csv(
+    input_file,
+    usecols=[&quot;collecteddate&quot;,&quot;headcount&quot;]
+
+)
+
+data[&quot;Timestamp&quot;] = pd.to_datetime(
+    data[&quot;collecteddate&quot;],
+    utc=True,
+    errors=&quot;coerce&quot;
+)
+
+# Ensure headcount is numeric
+data[&quot;headcount&quot;] = pd.to_numeric(
+    data[&quot;headcount&quot;],
+    errors=&quot;coerce&quot;
+)
+# Remove invalid measurements
+data = data.dropna(
+    subset=[&quot;Timestamp&quot;, &quot;headcount&quot;]
+)
+#sorting chronologically
+data=data.sort_values(&quot;Timestamp&quot;,kind=&quot;stable&quot;)
+
+print(&quot;\nFirst 15 original measurements:&quot;)
+print(
+    data[[&quot;Timestamp&quot;, &quot;headcount&quot;]]
+    .head(15)
+    .to_string(index=False)
+)
+
+print(&quot;\nOriginal headcount statistics:&quot;)
+print(data[&quot;headcount&quot;].describe())
+
+minute_counts = data.groupby(
+    data[&quot;Timestamp&quot;].dt.floor(&quot;min&quot;)
+).size()
+
+#If multiple readings have identical timestamps,
+#kep the last for the time weighted calc
+
+events = data.drop_duplicates(
+    subset=&quot;Timestamp&quot;,
+    keep=&quot;last&quot;
+)
+
+#calculating time weighted occupany per min
+
+# Timestamp representation in integer nanoseconds
+time_ns = (
+    events[&quot;Timestamp&quot;]
+    .dt.as_unit(&quot;ns&quot;)
+    .astype(&quot;int64&quot;)
+    .to_numpy()
+)
+
+headcounts = events[&quot;headcount&quot;].to_numpy(dtype=np.int64)
+
+# Duration between consecutive readings
+duration_ns = np.diff(time_ns)
+
+# Cumulative area under the occupancy-time curve
+cumulative_area = np.concatenate((
+    np.array([0], dtype=np.int64),
+    np.cumsum(
+        headcounts[:-1] * duration_ns,
+        dtype=np.int64
+    )
+))
+
+def integral_at(boundaries_ns):
+    &quot;&quot;&quot;Cumulative headcount × time at each boundary.&quot;&quot;&quot;
+
+    indices = np.searchsorted(
+        time_ns,
+        boundaries_ns,
+        side=&quot;right&quot;
+    ) - 1
+
+    results = np.zeros(
+        len(boundaries_ns),
+        dtype=np.int64
+    )
+
+    valid = indices &gt;= 0
+
+    results[valid] = (
+        cumulative_area[indices[valid]]
+        + headcounts[indices[valid]]
+        * (
+            boundaries_ns[valid]
+            - time_ns[indices[valid]]
+        )
+    )
+
+    return results
+
+
+# Start and end of every retained minute
+minute_start_ns = minute_counts.index.as_unit(&quot;ns&quot;).asi8
+minute_end_ns = minute_start_ns + 60_000_000_000
+
+# Time-weighted area during each minute
+minute_area = (
+    integral_at(minute_end_ns)
+    - integral_at(minute_start_ns)
+)
+
+# Account for the first partial minute
+covered_ns = (
+    minute_end_ns
+    - np.maximum(minute_start_ns, time_ns[0])
+)
+
+# Calculate minute-average occupancy
+average_headcount = minute_area / covered_ns
+
+print(&quot;\nFirst 10 calculated minute averages:&quot;)
+
+for timestamp, avg in zip(
+    minute_counts.index[:10],
+    average_headcount[:10]
+):
+    print(timestamp, round(avg, 4))
+
+#creating the training dataset
+
+training = pd.DataFrame({
+    &quot;Timestamp&quot;: minute_counts.index.tz_convert(
+        &quot;Australia/Melbourne&quot;
+    ),
+    &quot;Headcount&quot;: average_headcount,
+    &quot;MeasurementCount&quot;: minute_counts.to_numpy()
+})
+
+#extract time-based features
+training[&quot;Hour&quot;] = training[&quot;Timestamp&quot;].dt.hour
+training[&quot;Minute&quot;] = training[&quot;Timestamp&quot;].dt.minute
+training[&quot;DayOfWeek&quot;] = training[&quot;Timestamp&quot;].dt.dayofweek
+training[&quot;Month&quot;] = training[&quot;Timestamp&quot;].dt.month
+
+training[&quot;IsWeekend&quot;] = (
+    training[&quot;DayOfWeek&quot;] &gt;= 5
+).astype(int)
+
+#saving the processed data
+training.to_csv(output_file, index=False)
+
+#displaying results
+print(&quot;\nG20 training preprocessing complete&quot;)
+
+print(&quot;Original measurements:&quot;, len(data))
+print(&quot;One-minute observations:&quot;, len(training))
+
+print(&quot;\nTraining headcount statistics:&quot;)
+print(training[&quot;Headcount&quot;].describe())
+
+print(&quot;\nFirst 10 rows:&quot;)
+print(training.head(10).to_string(index=False))
+
+print(&quot;\nSaved to:&quot;, output_file)
+print(&quot;G20 validation data was not modified.&quot;)
+
+
+
+# ---------------------------------------------
+# Visual verification of preprocessing
+# ---------------------------------------------
+
+# Select the first 30mins
+start = training[&quot;Timestamp&quot;].iloc[0]
+end = start + pd.Timedelta(minutes=30)
+
+# Original sensor readings
+raw_sample = data[
+    (data[&quot;Timestamp&quot;] &gt;= start) &amp;
+    (data[&quot;Timestamp&quot;] &lt; end)
+].copy()
+
+# Processed minute averages
+minute_sample = training[
+    (training[&quot;Timestamp&quot;] &gt;= start) &amp;
+    (training[&quot;Timestamp&quot;] &lt; end)
+].copy()
+
+# Convert raw timestamps to Melbourne time
+raw_sample[&quot;Timestamp&quot;] = (
+    raw_sample[&quot;Timestamp&quot;]
+    .dt.tz_convert(&quot;Australia/Melbourne&quot;)
+)
+
+plt.figure(figsize=(14, 6))
+
+# Raw occupancy (assumed constant between readings)
+plt.step(
+    raw_sample[&quot;Timestamp&quot;],
+    raw_sample[&quot;headcount&quot;],
+    where=&quot;post&quot;,
+    label=&quot;Original headcount&quot;,
+    color=&quot;steelblue&quot;,
+    linewidth=1.2,
+    alpha=0.7
+)
+
+# One-minute time-weighted averages
+plt.scatter(
+    minute_sample[&quot;Timestamp&quot;] + pd.Timedelta(seconds=30),
+    minute_sample[&quot;Headcount&quot;],
+    label=&quot;One-minute weighted average&quot;,
+    color=&quot;darkorange&quot;,
+    s=18,
+    zorder=3
+)
+
+plt.title(&quot;G.20: Original vs One-Minute Occupancy&quot;)
+plt.xlabel(&quot;Time&quot;)
+plt.ylabel(&quot;Headcount&quot;)
+plt.legend()
+plt.grid(True, alpha=0.3)
+plt.tight_layout()
+
+plt.show()
+
+</code></pre></details>
+<footer>Generated by <code>tools/build_html_docs.py</code>. Source links refer to the GitHub <code>main</code> branch. Code is documented by parsing Python source; modules are not imported or executed.</footer></main></div>
+</body></html>
